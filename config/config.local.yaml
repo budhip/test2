@@ -1,0 +1,50 @@
+app:
+  env: dev
+  name: go-megatron
+  graceful_timeout: "10s"
+log:
+  option: stdout
+  level: info
+kafka:
+  publishers:
+    journal_stream:
+      brokers:
+        - kafka01-bootstrap.dev.amartha.id:9094
+      topic: journal_stream
+  consumers:
+    health_check_port: 80
+    papa_transaction_stream:
+      brokers:
+        - 34.128.120.97:9094
+        - 34.101.180.192:9094
+        - 34.101.143.97:9094
+      consumer_group: go-megatron-papa_transaction_stream
+      topic: transaction_stream
+    lsm_loan_logs:
+      brokers:
+        - kafka01-bootstrap.dev.amartha.id:9094
+      consumer_group: go-megatron-loan_logs
+      topic: loan_logs
+    bre_billing_repayment_logs:
+      brokers:
+        - kafka01-bootstrap.dev.amartha.id:9094
+      consumer_group: go-megatron-billing_repayment_logs
+      topic: billing_repayment_logs
+    acuan_transaction_notif:
+      brokers:
+        - kafka01-bootstrap.dev.amartha.id:9094
+      consumer_group: go-megatron-acuan-transaction-notif
+      topic: acuan-transaction-notif.local
+
+go_accounting:
+  base_url: https://go-accounting-dev.amartha.id
+  secret_key: amartha-jy4uLtdYWx
+  retry_count: 3
+  retry_wait_time: 100
+  timeout: 1s
+
+feature_flag_sdk:
+  url: https://feature-dev.amartha.id/api
+  token: "*:development.5e969ec15b9210c907483b31266de5b7709a2bed1a62811e5784ea4e"
+  env: development
+  refresh_interval: 5m

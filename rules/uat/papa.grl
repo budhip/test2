@@ -1,0 +1,137 @@
+rule StopProcessingIfPaymentNotSuccessful "Stop processing if payment is not successful" salience 1000 {
+    when
+        Payment.Status != "SUCCESSFUL"
+    then
+        Complete();
+}
+
+rule SetDefaultAcuanTransactionAttributes "Set default attributes for transaction acuan" salience 100 {
+    when
+        !Transaction.DefaultAttributeSet
+    then
+        Transaction.FromAccount = "";
+        Transaction.ToAccount = "";
+        Transaction.TransactionType = "";
+        Transaction.TransactionTime = Payment.SuccessfulAt;
+        Transaction.Description = Payment.Description;
+        Transaction.Amount = Payment.Amount;
+        Transaction.Currency = Payment.Currency;
+
+        Metadata.AccountNumber = Payment.AccountNumber;
+        Metadata.PaymentTransactionID = Payment.ID;
+        Metadata.PaymentTransactionReferenceNumber = Payment.ReferenceNumber;
+        Metadata.PaymentTransactionExternalReferenceNumber = Payment.ExternalReferenceNumber;
+        Metadata.EntityCode = Payment.EntityCode;
+        Metadata.Description = Payment.Description;
+
+        // add amount metadata. if there is no value, it will be be empty
+        Metadata.Amount = Payment.Amount;
+        Metadata.AdminFee = Payment.GetAdminFeeAmount();
+        Metadata.Net = Payment.GetNetAmount();
+
+        Transaction.DefaultAttributeSet = true;
+}
+
+rule TransformPaymentTransactionDisbursementPLToAcuan "When it's disbursement partnership loan, transform to transaction acuan" salience 10 {
+    when
+        Payment.PaymentType == "DISBURSEMENT_PL" && Flag.IsEnabled("PAYMENT_BE_go-megatron_allow_DSBAA")
+    then
+        Transaction.FromAccount = Payment.AccountNumber;
+        Transaction.ToAccount = "00000100000001";
+        Transaction.TransactionType = "DSBAA";
+
+        Order.RefNumber = Payment.ExternalReferenceNumber;
+        Order.OrderType = "DSB";
+        Order.Transactions.Append(Transaction.GetValue());
+        Order.IsReadyToPublish = true;
+
+        Retract("TransformPaymentTransactionDisbursementPLToAcuan");
+}
+
+rule TransformPaymentTransactionRepaymentPLToAcuan "When it's repayment partnership loan, transform to transaction acuan" salience 10 {
+    when
+        Payment.PaymentType == "REPAYMENT_PL" && Flag.IsEnabled("PAYMENT_BE_go-megatron_allow_RPYAA")
+    then
+        Transaction.FromAccount = "00000100000001";
+        Transaction.ToAccount = Payment.AccountNumber;
+        Transaction.TransactionType = "RPYAA";
+
+        Order.RefNumber = Payment.ExternalReferenceNumber;
+        Order.OrderType = "RPY";
+        Order.Transactions.Append(Transaction.GetValue());
+        Order.IsReadyToPublish = true;
+
+        Retract("TransformPaymentTransactionRepaymentPLToAcuan");
+}
+
+rule TransformPaymentTransactionIncomePLToAcuan "When it's income partnership loan, transform to transaction acuan" salience 10 {
+    when
+        Payment.PaymentType == "INCOME_PL"
+    then
+        Transaction.FromAccount = Payment.AccountNumber;
+        Transaction.ToAccount = "00000100000001";
+        Transaction.TransactionType = "MFWAF";
+
+        Order.RefNumber = Payment.ExternalReferenceNumber;
+        Order.OrderType = "MFW";
+        Order.Transactions.Append(Transaction.GetValue());
+        Order.IsReadyToPublish = true;
+
+        Retract("TransformPaymentTransactionIncomePLToAcuan");
+}
+
+rule TransformPaymentTransactionPPNPLToAcuan "When it's PPN partnership loan, transform to transaction acuan" salience 10 {
+    when
+        Payment.PaymentType == "PPN_PL"
+    then
+        Transaction.FromAccount = Payment.AccountNumber;
+        Transaction.ToAccount = "00000100000001";
+        Transaction.TransactionType = "MFWPN";
+
+        Order.RefNumber = Payment.ExternalReferenceNumber;
+        Order.OrderType = "MFW";
+        Order.Transactions.Append(Transaction.GetValue());
+        Order.IsReadyToPublish = true;
+
+        Retract("TransformPaymentTransactionPPNPLToAcuan");
+}
+
+rule TransformPaymentTransactionInterestPLToAcuan "When it's interest partnership loan, transform to transaction acuan" salience 10 {
+    when
+        Payment.PaymentType == "INTEREST_PL"
+    then
+        Transaction.FromAccount = Payment.AccountNumber;
+        Transaction.ToAccount = "00000100000001";
+        Transaction.TransactionType = "MFWIT";
+
+        Order.RefNumber = Payment.ExternalReferenceNumber;
+        Order.OrderType = "MFW";
+        Order.Transactions.Append(Transaction.GetValue());
+        Order.IsReadyToPublish = true;
+
+        Retract("TransformPaymentTransactionInterestPLToAcuan");
+}
+
+rule TransformPaymentTransactionPPHPLToAcuan "When it's PPH partnership loan, transform to transaction acuan" salience 10 {
+    when
+        Payment.PaymentType == "PPH_PL"
+    then
+        Transaction.FromAccount = Payment.AccountNumber;
+        Transaction.ToAccount = "00000100000001";
+        Transaction.TransactionType = "MFWPH";
+
+        Order.RefNumber = Payment.ExternalReferenceNumber;
+        Order.OrderType = "MFW";
+        Order.Transactions.Append(Transaction.GetValue());
+        Order.IsReadyToPublish = true;
+
+        Retract("TransformPaymentTransactionPPHPLToAcuan");
+}
+
+rule PublishOrder "When acuan's order is ready to publish, publish it" salience -1 {
+    when
+        Order.IsReadyToPublish == true
+    then
+        Order.Publish();
+        Retract("PublishOrder");
+}

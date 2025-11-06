@@ -1,0 +1,86 @@
+rule CheckLoanKind "When loan kind is not BroilerX, exit rules" salience 100 {
+    when
+        Loan.Kind != "BROILERX_LOAN"
+    then
+        Complete();
+}
+
+rule SetAdminFeeKindPercentage "When Fee kind having percentage, count with formula fee/100 * tenor * principal" salience 15 {
+    when
+        !IsZero(Transaction.Fee) && Transaction.Fee.ValueKind == "percentage"
+    then
+        Transaction.AdminFee = Transaction.Fee.Value.Div(Transaction.Percentage).Mul(Transaction.Tenor).Mul(Loan.Principal.Amount);
+        Retract("SetAdminFeeKindPercentage");
+}
+
+rule SetAdminFeeKindAmount "When Fee kind having amount, return it" salience 14 {
+    when
+        !IsZero(Transaction.Fee) && Transaction.Fee.ValueKind == "amount"
+    then
+        Transaction.AdminFee = Transaction.Fee.Value;
+        Retract("SetAdminFeeKindAmount");
+}
+
+rule SetPPN "When admin fee is not zero, count PPN" salience 13 {
+    when
+        !Transaction.AdminFee.IsZero()
+    then
+        Transaction.PPN = Transaction.AdminFee.Mul(Transaction.A.Div(Transaction.B)).Round(Transaction.RoundPlaces);
+        Retract("SetPPN");
+}
+
+rule SetAdminFeeAmount "When PPN and admin fee is not zero, count amount" salience 12 {
+    when
+        !Transaction.PPN.IsZero() && !Transaction.AdminFee.IsZero()
+    then
+        Transaction.AdminFeeAmount = Transaction.AdminFee.Sub(Transaction.PPN);
+        Retract("SetAdminFeeAmount");
+}
+
+rule SetBroilerxPartnerAccount "When loan kind is BroilerX, return BroilerX acccount (admin,ppn)" salience 11 {
+    when
+        Loan.Kind == "BROILERX_LOAN"
+    then
+        Transaction.AdminPartnerAccount = "221001000000009";
+        Transaction.PPNPartnerAccount = "241001000000006";
+        Retract("SetBroilerxPartnerAccount");
+}
+
+rule AppendAdminFeeTransaction "When loan having ACTIVE state, append admin fee transaction" salience 4 {
+    when
+        Loan.State == "ACTIVE" && !Transaction.AdminFeeAmount.IsZero() && Transaction.AdminPartnerAccount != "0"
+    then
+        Transaction.AddTransaction("00000100000001",Transaction.AdminPartnerAccount,"","DSBAC",Loan.Principal.Currency,Loan.Kind,Loan.DisbursedDate,Transaction.AdminFeeAmount);
+
+        Retract("AppendAdminFeeTransaction");
+}
+
+rule AppendPPNTransaction "When loan having ACTIVE state, append PPN transaction" salience 2 {
+    when
+        Loan.State == "ACTIVE" && !Transaction.PPN.IsZero() && Transaction.PPNPartnerAccount != "0"
+    then
+        Transaction.AddTransaction("00000100000001",Transaction.PPNPartnerAccount,"","DSBAD",Loan.Principal.Currency,Loan.Kind,Loan.DisbursedDate,Transaction.PPN);
+
+        Retract("AppendPPNTransaction");
+}
+
+rule TransformLoanLogsToTransaction "When loan having ACTIVE state, tranform to ACuan transaction" salience 1 {
+    when
+        Loan.State == "ACTIVE" && !Loan.DisbursedDate.IsZero() && Transaction.PPNPartnerAccount != "0" && Transaction.AdminPartnerAccount != "0"
+    then
+        Transaction.OrderType = "DSB";
+        Transaction.RefNumber = "DSB_" + Loan.ID;
+        Transaction.AddTransaction("00000100000001",Loan.AccountNumber,"","DSBAB",Loan.Principal.Currency,Loan.Kind,Loan.DisbursedDate,Loan.Principal.Amount);
+
+        Transaction.IsReadyToPublish = true;
+
+        Retract("TransformLoanLogsToTransaction");
+}
+
+rule PublishTransaction "When transaction acuan is ready to publish, publish it" {
+    when
+        Transaction.IsReadyToPublish
+    then
+        Transaction.Publish();
+        Retract("PublishTransaction");
+}

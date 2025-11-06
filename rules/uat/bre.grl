@@ -1,0 +1,119 @@
+rule CheckLoanKind "When loan kind is not BroilerX, exit rules" salience 14 {
+    when
+        Bill.LoanKind != "BROILERX_LOAN"
+    then
+        Complete();
+}
+
+// Set Accounts
+rule SetSystemAccount "When true, set system account" salience 13 {
+    when
+        true
+    then
+        Transaction.SystemAccount = "00000100000001";
+        Retract("SetSystemAccount");
+}
+
+rule SetAccountsBroilerX "When loan kind is BroilerX, set accounts" salience 12 {
+    when
+        Bill.LoanKind == "BROILERX_LOAN"
+    then
+        Transaction.PPHLenderAccount      = "241001000000001";
+        Transaction.AmarthaRevenueAccount = "221001000000009";
+        Transaction.PPNPartnerAccount     = "241001000000006";
+
+        Retract("SetAccountsBroilerX");
+}
+
+// Forward repayment
+
+rule AppendCIHLenderAccountTransaction "when type is LENDER_MARGIN, append CIH transaction" salience 10 {
+    when
+        ForwardRepayment.Type == "LENDER_MARGIN"
+    then
+        Transaction.AddTransaction(Transaction.SystemAccount,ForwardRepayment.AccountNumber,"","RPYAB",Bill.LoanKind,Bills.PaidAt,ForwardRepayment.Amount);
+        Retract("AppendCIHLenderAccountTransaction");
+}
+
+rule AppendPPHLenderTransaction "When type is LENDER_MARGIN, append pph lender transaction" salience 9 {
+    when
+        ForwardRepayment.Type == "LENDER_MARGIN" &&  Transaction.PPHLenderAccount != "0"
+    then
+        Transaction.AddTransaction(Transaction.SystemAccount,Transaction.PPHLenderAccount,"","RPYAC",Bill.LoanKind,Bills.PaidAt,ForwardRepayment.IncomeTax);
+        Retract("AppendPPHLenderTransaction");
+}
+
+rule AppendInvestedLenderTransaction "When type is LENDER_PRINCIPAL, append invetsed lender transaction" salience 8 {
+    when
+        ForwardRepayment.Type == "LENDER_PRINCIPAL"
+    then
+        Transaction.AddTransaction(
+            Transaction.GetInvestedAccount(ForwardRepayment.AccountNumber),
+            ForwardRepayment.AccountNumber,
+            "",
+            "RPYAD",
+            Bill.LoanKind,
+            Bills.PaidAt,
+            ForwardRepayment.Amount
+        );
+        Retract("AppendInvestedLenderTransaction");
+}
+
+rule AppendOutstandingTransaction "When type is LOAN_OUTSTANDING, append borrower outstanding transaction" salience 7 {
+    when
+        ForwardRepayment.Type == "LOAN_OUTSTANDING"
+    then
+        Transaction.AddTransaction(ForwardRepayment.AccountNumber,Transaction.SystemAccount,"","RPYAE",Bill.LoanKind,Bills.PaidAt,ForwardRepayment.Amount);
+        Retract("AppendOutstandingTransaction");
+}
+
+rule SetPPNAmount "When type is AMARTHA_MARGIN, count PPN amount" salience 6 {
+    when
+        ForwardRepayment.Type == "AMARTHA_MARGIN"
+    then
+        Transaction.PPNAmount = ForwardRepayment.Amount.Mul(Transaction.A.Div(Transaction.B)).Round(Transaction.RoundPlaces);
+        Retract("SetPPNAmount");
+}
+
+rule SetAmarthaRevenueAmount "When PPN is not zero and type is AMARTHA_MARGIN, count Amartha Revenue Amount" salience 5 {
+    when
+        ForwardRepayment.Type == "AMARTHA_MARGIN" && !Transaction.PPNAmount.IsZero()
+    then
+        Transaction.AmarthaRevenueAmount = ForwardRepayment.Amount.Sub(Transaction.PPNAmount);
+        Retract("SetAmarthaRevenueAmount");
+}
+
+rule AppendAmarthaRevenueTransaction "When Amartha revenue value is not zero and type is AMARTHA_MARGIN, append Amartha revenue transaction" salience 4 {
+    when
+        !Transaction.AmarthaRevenueAmount.IsZero() && ForwardRepayment.Type == "AMARTHA_MARGIN"
+    then
+        Transaction.AddTransaction(Transaction.SystemAccount,Transaction.AmarthaRevenueAccount,"","RPYAF",Bill.LoanKind,Bills.PaidAt,Transaction.AmarthaRevenueAmount);
+        Retract("AppendAmarthaRevenueTransaction");
+}
+
+rule AppendPPNTransaction "When PPN fee is not zero and type is AMARTHA_MARGIN, append PPN transaction" salience 3 {
+    when
+        !Transaction.PPNAmount.IsZero() && ForwardRepayment.Type == "AMARTHA_MARGIN"
+    then
+        Transaction.AddTransaction(Transaction.SystemAccount,Transaction.PPNPartnerAccount,"","RPYAG",Bill.LoanKind,Bills.PaidAt,Transaction.PPNAmount);
+        Retract("AppendPPNTransaction");
+}
+
+rule TransformBREToACuan "When forward repayment is not empty, transform BRE event to ACuan" salience 2 {
+    when
+        Bills.ForwardRepayments.Len() > 0 && Transaction.IsForwardRepaymentProcessDone
+    then
+        Transaction.OrderType = "RPY";
+        Transaction.RefNumber = Bill.LoanID + "_" + Bills.ID + "_" + Transaction.Now;
+        Transaction.IsReadyToPublish = true;
+
+        Retract("TransformBREToACuan");
+}
+
+rule PublishTransaction "When transaction acuan is ready to publish, publish it" {
+    when
+        Transaction.IsReadyToPublish
+    then
+        Transaction.Publish();
+        Retract("PublishTransaction");
+}

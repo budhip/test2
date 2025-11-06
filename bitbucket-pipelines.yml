@@ -1,0 +1,247 @@
+---
+image:
+  name: asia.gcr.io/amartha-dev/amartha/go-base:1.22-alpine
+  username: _json_key
+  password: "$GCR_DEV_JSON_KEY"
+
+options:
+  docker: true
+
+clone:
+  depth: full
+    
+definitions:
+  caches:
+    gomod: ~/.cache/go-build
+    gopathmod: $GOPATH/pkg/mod
+  steps:
+    - step: &unit-test
+        size: 2x
+        name: run unit test
+        caches: &gomod-cache
+          - gomod
+          - gopathmod
+        script:
+          - &config-git git config --global --add url."git@bitbucket.org:".insteadOf "https://bitbucket.org/"
+          - &install-deps GOPRIVATE=bitbucket.org/Amartha go get ./...
+          - &upgrade-ugorji-workaround |
+            rm -rf /go/pkg/mod/github.com/coreos/etcd@v3.3.10+incompatible/client/keys.generated.go
+            go get github.com/ugorji/go/codec@none
+          - go test -race -short -coverprofile=./cov.out ./... -gcflags=all=-l
+        artifacts:
+          - cov.out
+
+    - step: &lint
+        size: 2x
+        name: run linter
+        script:
+          - *config-git
+          - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.54.2
+          - set +e
+          - golangci-lint run ./...
+          - set -e
+
+    - step: &build-push-docker
+        image:
+          name: asia-southeast2-docker.pkg.dev/amartha-dev/docker/argocd-deployer:v0.6.1
+          username: _json_key
+          password: "$GCR_DEV_JSON_KEY"
+        caches:
+          - docker
+        script:
+          - export IS_MULTIPLE_SVC=true
+          - export TAGS=$(git rev-parse --short HEAD)
+          - /ci/scripts/auth-gcp.sh
+          - export DOCKER_REGISTRY=asia-southeast2-docker.pkg.dev/amartha-ewallet-dev-370304/docker
+          - /ci/scripts/build-push-docker.sh
+
+    # - step: &sec-deps
+    #     name: test security dependencies
+    #     image:
+    #       name: asia.gcr.io/amartha-dev/amartha/snyk-go:1.18.3
+    #       username: _json_key
+    #       password: "$GCR_DEV_JSON_KEY"
+    #     script:
+    #       - echo 'Synk test'
+    #       - *config-git
+    #       - snyk config set api=${snyk_api_key}
+    #       - snyk monitor --file=go.mod
+
+    - step: &semantic-versioning
+        name: Create tag
+        trigger: manual
+        image:
+          name: asia.gcr.io/amartha-dev/amartha/semantic-release:1.1.0
+          username: _json_key
+          password: "$GCR_DEV_JSON_KEY"
+        script:
+          - touch semantic_version.txt
+          - npx semantic-release
+          - new_version="$(cat ./semantic_version.txt)"
+          - >
+            if [[ -z "$new_version" ]]; then
+                echo "No new version generated. Please use semantic versioning in your commit messages"
+                exit 1
+            else
+                echo "New version '$new_version' generated"
+                exit 0
+            fi
+        artifacts:
+          - semantic_version.txt
+
+    - step: &outdated-deps
+        name: list outdated dependencies
+        caches: &gomod-cache
+          - gomod
+          - gopathmod
+        script:
+          # https://github.com/psampaz/go-mod-outdated
+          - echo 'List Outdated Dependencies'
+          - &config-git git config --global --add url."git@bitbucket.org:".insteadOf "https://bitbucket.org/"
+          - go install github.com/psampaz/go-mod-outdated@v0.8.0
+          - go list -u -m -json all | go-mod-outdated -direct -update
+
+    - step: &static-code-analysis
+        name: static code analysis
+        image: sonarsource/sonar-scanner-cli:4.3
+        script:
+          - set +e
+          - echo 'Static code analysis'
+          - |
+            sonar-scanner \
+            -Dsonar.projectKey=${service_executable_and_user} \
+            -Dsonar.sources=internal/  \
+            -Dsonar.exclusions=**/*_test.go,**/mock/*.go,**/constructor.go,**/init.go,**/model.gen.go \
+            -Dsonar.tests=internal/ \
+            -Dsonar.test.inclusions=**/*_test.go \
+            -Dsonar.host.url=${sq_url} \
+            -Dsonar.login=${sq_token} \
+            -Dsonar.projectVersion="$(cat ./semantic_version.txt)" \
+            -Dsonar.go.coverage.reportPaths=./cov.out \
+            -Dsonar.qualitygate.wait=true
+          - set -e
+
+    - step: &build
+        name: build artifact
+        caches: *gomod-cache
+        script:
+          - *config-git
+          - *install-deps
+          - *upgrade-ugorji-workaround
+          - export TZ="Asia/Jakarta"
+          - export BUILD_DATE="$(date "+%Y%m%d-%H%M%S-%Z")"
+          - rm -f "${service_executable_and_user}"
+          - GOPRIVATE=bitbucket.org/Amartha GOOS=linux GOARCH=amd64 go build -o go-megatron-consumer -ldflags "-X main.commit=${BITBUCKET_COMMIT} -X main.build_datetime=${BUILD_DATE} -s -w -linkmode external -extldflags \"-static\" " ./cmd/consumer/main.go
+        artifacts:
+          - go-megatron-consumer
+
+  # - step: &api-automation
+  #     name   : 'API Automation Testing'
+  #     size   : 2x
+  #     image:
+  #       name: asia.gcr.io/amartha-dev/amartha/robot-alpine:1.1.2
+  #       username: _json_key
+  #       password: "$GCR_DEV_JSON_KEY"
+  #     script :
+  #       - apk update && apk add build-base
+  #       - cd ./tests/api-robot
+  #       - pip install testrail-api
+  #       - pip install trcli
+  #       - apk update && apk add python3-dev gcc libc-dev git g++ make
+  #       - chmod +x install_librdkafka.sh && ./install_librdkafka.sh
+  #       - pip install robotframework-confluentkafkalibrary
+  #       - python -m robot.run --listener send_report_to_slack.py  --variablefile main/env_dev.py . || true
+  #       - python compare-result.py
+  #     artifacts:
+  #       - "**/api-robot/log.html"
+  #       - "**/api-robot/output.xml"
+  #       - "**/api-robot/report.html"
+
+pipelines:
+  pull-requests:
+    "**":
+      - parallel:
+          fail-fast: true
+          steps:
+            - step: *unit-test
+            - step: *lint
+            # - step: *api-automation
+  
+  branches:
+    master:
+      - parallel:
+          fail-fast: true
+          steps:
+            - step: *unit-test
+            - step: *lint
+            - step: *outdated-deps
+            - step: *static-code-analysis
+            # - step: *sec-deps
+
+      - step: *build
+
+      - stage:
+          name: "Deploy to DEV [ArgoCD]"
+          deployment: DEV
+          steps:
+            - step:
+                <<: *build-push-docker
+                name: build and push docker image
+                runs-on:
+                  - gke.amartha.dev
+            - step: 
+                name: "Deploy to DEV"
+                runs-on:
+                  - gke.amartha.dev
+                image:
+                  name: asia-southeast2-docker.pkg.dev/amartha-dev/docker/argocd-deployer:v0.6.1
+                  username: _json_key
+                  password: "$GCR_DEV_JSON_KEY"
+                script:
+                  - export IS_MULTIPLE_SVC=true
+                  - export ENVIRONMENT=pay-${environment}
+                  - export TAG=$(git rev-parse --short HEAD)
+                  - export SERVICE_TYPES=consumer
+                  - /ci/scripts/argocd-sync.sh
+          trigger: automatic
+
+      # - parallel:
+      #     - step: *static-code-analysis
+          # - step: *docs
+          # - step: *api-automation
+
+      - step:
+          name: Deploy to UAT [ArgoCD]
+          runs-on:
+            - gke.amartha.uat
+          deployment: UAT
+          image:
+            name: asia-southeast2-docker.pkg.dev/amartha-dev/docker/argocd-deployer:v0.6.1
+            username: _json_key
+            password: "$GCR_DEV_JSON_KEY"
+          script:
+            - export IS_MULTIPLE_SVC=true
+            - export ENVIRONMENT=pay-${environment}
+            - export TAG=$(git rev-parse --short HEAD)
+            - export SERVICE_TYPES=consumer
+            - /ci/scripts/argocd-sync.sh
+          trigger: manual
+
+      - step: *semantic-versioning
+
+      - step:
+          name: Deploy to PROD [ArgoCD]
+          runs-on:
+            - gke.amartha.prod
+          deployment: PROD
+          image:
+            name: asia-southeast2-docker.pkg.dev/amartha-dev/docker/argocd-deployer:v0.6.1
+            username: _json_key
+            password: "$GCR_DEV_JSON_KEY"
+          script:
+            - export IS_MULTIPLE_SVC=true
+            - export ENVIRONMENT=pay-${environment}
+            - export TAG=$(git rev-parse --short HEAD)
+            - export SERVICE_TYPES=consumer
+            - /ci/scripts/argocd-sync.sh
+          trigger: manual

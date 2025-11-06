@@ -1,0 +1,9 @@
+FROM alpine:3.19
+WORKDIR /opt/Amartha
+
+COPY go-megatron-consumer ./
+COPY rules ./rules/
+
+RUN apk add --no-cache tzdata
+ENV TZ Asia/Jakarta
+CMD ["./go-megatron-consumer"]

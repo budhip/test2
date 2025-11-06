@@ -1,0 +1,72 @@
+replicaCount: 3
+
+env: prod
+
+image:
+  repository: asia-southeast2-docker.pkg.dev/amartha-ewallet-dev-370304/docker/go-megatron
+  pullPolicy: IfNotPresent
+  tag: ""
+
+args:
+  - ./go-megatron-consumer
+  - run
+  - "-n=transformer_stream_dlq"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: go-megatron-consumer-transformerstreamdlq
+
+
+extraEnvs: []
+
+readinessProbe:
+  failureThreshold: 10
+  httpGet:
+    path: /health/consumer
+    port: 80
+    scheme: HTTP
+  periodSeconds: 10
+  successThreshold: 1
+  timeoutSeconds: 10
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 200Mi
+  requests:
+    cpu: 500m
+    memory: 100Mi
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "80"
+  prometheus.io/path: "/metrics"
+
+autoscaling:
+  enabled: false
+  # minReplicas: 1
+  # maxReplicas: 2
+  # targetMemoryUtilizationPercentage: 80
+  # targetCPUUtilizationPercentage: 80
+  
+volumeMounts:
+  - name: secret-volume
+    mountPath: /opt/Amartha/config
+    readOnly: true
+
+volumes:
+  - name: secret-volume
+    secret:
+      secretName: go-megatron-consumer-transformerstreamdlq-vault-service
+
+vault:
+  enabled: true
+  auth:
+    method: "kubernetes"
+    kubernetes:
+      role: go-megatron-consumer-transformerstreamdlq
+      serviceAccount: go-megatron-consumer-transformerstreamdlq
+  secrets:
+    service:
+      secretPath: apps/core-finance-platform/GO_MEGATRON

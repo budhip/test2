@@ -1,0 +1,21 @@
+version: '3.7'
+services:
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - 8080:8080
+    environment:
+      KAFKA_CLUSTERS_0_NAME: amartha-dev
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: 34.128.120.97:9094
+      # KAFKA_CLUSTERS_0_METRICS_PORT: 9997
+      # KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      # KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: first
+      # KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect-1:8083
+      DYNAMIC_CONFIG_ENABLED: 'true'  # not necessary, added for tests
+      KAFKA_CLUSTERS_0_AUDIT_TOPICAUDITENABLED: 'true'
+      KAFKA_CLUSTERS_0_AUDIT_CONSOLEAUDITENABLED: 'true'
+    networks: 
+      - swarm-overlay-net
+networks: 
+  swarm-overlay-net:
+    external: true
