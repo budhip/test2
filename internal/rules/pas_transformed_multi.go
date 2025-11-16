@@ -153,3 +153,18 @@ func (t *pasTransformed) GetBankHOPoolingRepaymentByEntity(entity string) string
 	entityCode := t.GetEntity(strings.ToLower(entity))
 	return t.cfg.ConfigAccount.MapBankHORepaymentPooling[entityCode]
 }
+
+// GetAccountByEntityDestination mendapatkan account number untuk DSBPI berdasarkan entity dari destination account
+func (t *pasTransformed) GetAccountByEntityDestination(destinationAccountId string) string {
+	// Get account detail untuk mendapatkan entity code
+	account := t.GetAccountsByAccountNumber(destinationAccountId)
+	if account.AccountNumber == "" {
+		t.prePublishErrors = multierror.Append(t.prePublishErrors,
+			fmt.Errorf("account not found for destination account id: %s", destinationAccountId))
+		return ""
+	}
+
+	entityCode := t.GetEntity(strings.ToLower(account.EntityCode))
+
+	return t.cfg.ConfigAccount.MapDSBPIAccountEntity[entityCode]
+}

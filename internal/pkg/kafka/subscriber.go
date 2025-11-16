@@ -2,7 +2,6 @@ package kafka
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"bitbucket.org/Amartha/go-megatron/internal/config"
@@ -46,12 +45,12 @@ func NewSubscriber(
 	if mtc != nil {
 		defaultOpts = append(
 			defaultOpts,
-			kafka.WithSubscriberGenericPromMetrics(
-				mtc.PrometheusRegisterer(),
-				fmt.Sprintf("%s_consumer_metric", cfg.App.Name),
-				consumerGroup,
-				1*time.Second,
-			),
+			//kafka.WithSubscriberGenericPromMetrics(
+			//	mtc.PrometheusRegisterer(),
+			//	fmt.Sprintf("%s_consumer_metric", cfg.App.Name),
+			//	consumerGroup,
+			//	1*time.Second,
+			//),
 		)
 	}
 

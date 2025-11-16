@@ -37,3 +37,8 @@ run-kafka:
 
 stop-kafka:
 	docker stack rm amartha-dev
+
+# Run API Server
+api:
+	@echo "🚀 Starting API Server..."
+	@go run cmd/api/main.go

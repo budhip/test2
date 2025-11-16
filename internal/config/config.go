@@ -10,6 +10,7 @@ import (
 type Configuration struct {
 	App                AppConfiguration            `json:"app"`
 	Log                LogConfiguration            `json:"log"`
+	Database           DatabaseConfiguration       `json:"database"`
 	Kafka              KafkaConfiguration          `json:"kafka"`
 	GoAccounting       HTTPConfiguration           `json:"go_accounting"`
 	FeatureFlagSDK     FeatureFlagSDKConfiguration `json:"feature_flag_sdk"`
@@ -29,6 +30,14 @@ type AppConfiguration struct {
 type LogConfiguration struct {
 	Option string `json:"option"`
 	Level  string `json:"level"`
+}
+
+type DatabaseConfiguration struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+	Password string `json:"password"`
+	DBName   string `json:"dbname"`
 }
 
 type KafkaConfiguration struct {
@@ -94,6 +103,7 @@ type MapConfigAccount struct {
 	MapAccountEntityTrxTypes          map[string]map[string]string `json:"map_account_entity_trx_types"`
 	MapRepaymentCashInTransitEntity   map[string]string            `json:"map_repayment_cit_entity"`
 	MapBankHORepaymentPooling         map[string]string            `json:"map_bank_ho_repayment_pooling_entity"`
+	MapDSBPIAccountEntity             map[string]string            `json:"map_dsbpi_account_entity"`
 }
 
 type ExponentialBackOffConfig struct {

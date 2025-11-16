@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	Version        = "0.0.1"
+	Version        = "latest"
 	EngineMaxCycle = 16
 )
 

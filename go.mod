@@ -14,6 +14,7 @@ require (
 	github.com/go-resty/resty/v2 v2.11.0
 	github.com/hyperjumptech/grule-rule-engine v1.14.1
 	github.com/labstack/echo/v4 v4.12.0
+	github.com/lib/pq v1.10.9
 	github.com/newrelic/go-agent/v3/integrations/nrzap v1.0.1
 	github.com/prometheus/client_golang v1.20.5
 	github.com/spf13/cobra v1.8.0

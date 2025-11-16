@@ -3,66 +3,66 @@ app:
   name: go-megatron
   graceful_timeout: "10s"
 log:
-  option: stdoutfile
-  level: debug
+  option: stdout
+  level: info
+http:
+  port: "8080"
+  read_timeout: "30s"
+  write_timeout: "30s"
+  shutdown_timeout: "10s"
+database:
+  host: db-vm-pg.payments-dev.amartha.id
+  port: 5432
+  user: payment_dev
+  password: SXlj16b9FeuH
+  dbname: acuan_transaction
+  dbschema: public
+  max_conns: 10
+  min_conns: 2
 kafka:
-  broker_list: "localhost:9092"
-  topic: "order-transaction"
-  topup_key: "topup"
-  investment_key: "investment"
-  cashout_key: "cashout"
-  disbursement_key: "disbursement"
-  
   publishers:
     journal_stream:
-      brokers: 
-        - localhost:9092
+      brokers:
+        - kafka01-bootstrap.dev.amartha.id:9094
       topic: journal_stream
     transformer_stream_dlq:
-      brokers: 
-        - localhost:9092
+      brokers:
+        - kafka01-bootstrap.dev.amartha.id:9094
       topic: transformer_stream_dlq
   consumers:
     health_check_port: 80
     papa_transaction_stream:
-      brokers: 
-        - localhost:9092
+      brokers:
+        - kafka01-bootstrap.dev.amartha.id:9094
       consumer_group: go-megatron-papa_transaction_stream
       topic: transaction_stream
     lsm_loan_logs:
       brokers:
-        - localhost:9092
+        - kafka01-bootstrap.dev.amartha.id:9094
       consumer_group: go-megatron-loan_logs
       topic: loan_logs
     bre_billing_repayment_logs:
       brokers:
-        - localhost:9092
+        - kafka01-bootstrap.dev.amartha.id:9094
       consumer_group: go-megatron-billing_repayment_logs
       topic: billing_repayment_logs
     acuan_transaction_notif:
-      brokers: 
-        - localhost:9092
+      brokers:
+        - kafka01-bootstrap.dev.amartha.id:9094
       consumer_group: go-megatron-acuan-transaction-notif
-      topic: acuan-transaction-notif
+      topic: acuan-transaction-notif.local
     transformer_stream_dlq:
       brokers:
-        - localhost:9092
+        - kafka01-bootstrap.dev.amartha.id:9094
       consumer_group: go-megatron-transformer_stream_dlq
       topic: transformer_stream_dlq
 
 go_accounting:
   base_url: https://go-accounting-dev.amartha.id
-  base_url_migration: https://go-accounting-dev.amartha.id
   secret_key: amartha-jy4uLtdYWx
   retry_count: 3
   retry_wait_time: 100
   timeout: 1s
-
-feature_flag_sdk:
-  url: https://feature-dev.amartha.id/api
-  token: "*:development.5e969ec15b9210c907483b31266de5b7709a2bed1a62811e5784ea4e"
-  env: development
-  refresh_interval: 5m
 
 ddd_notification:
   base_url: https://api-gw-dev.amartha.id/notification-api
@@ -71,13 +71,12 @@ ddd_notification:
   slack_channel: pas-notifications-dev
   title_bot: Payment Accounting System Alert Bot
 
-exponential_backoff:
-  max_retries: 2
-  max_backoff_time: 15s
-  initial_interval: 15s
-  max_elapsed_time: 1m
-  backoff_multiplier: 1
-  
+feature_flag_sdk:
+  url: https://feature-dev.amartha.id/api
+  token: "*:development.5e969ec15b9210c907483b31266de5b7709a2bed1a62811e5784ea4e"
+  env: development
+  refresh_interval: 5m
+
 config_account:
   map_account_order_types_entity_product:
     "001_adm":
@@ -165,7 +164,7 @@ config_account:
       - "indosat_loan": "121005000000026"
       - "modal_paylater_loan": "121005000000021"
       - "agriaku_loan": ""
-      
+
     "001_rpy":
       - "default": ""
       - "broilerx_loan": "121001000000006"
@@ -218,23 +217,13 @@ config_account:
       - "credit": "143003000000003"
 
   map_repayment_cit_entity:
-      "001": "121001000000101"
-      "005": "121005000000104"
-  
+    "001": "121001000000101"
+    "005": "121005000000104"
+
   map_bank_ho_repayment_pooling_entity:
     "001": "114001000000004"
     "005": "114005000000006"
 
-go_acuan_lib:
-  kafka:
-    broker_list: "kafka01-bootstrap.dev.amartha.id:9094"
-    partition_strategy: "roundrobin"
-  topic: "order-transaction"
-  topic_accounting: "accountevent_stream"
-  topup_key: "topup"
-  investment_key: "investment"
-  cashout_key: "cashout"
-  disbursement_key: "disbursement"
-  disbursement_failed_key: "disbursement_failed"
-  repayment_key: "repayment"
-  refund_key: "refund"
+  map_dsbpi_account_entity:
+    "001": "121001000000009"
+    "005": "121005000000105"

@@ -6275,6 +6275,39 @@ rule TransformAcuanTransactionRepaymentCashless "When acuan transaction type is 
         Retract("TransformAcuanTransactionRepaymentCashless");
 }
 
+
+rule TransformAcuanTransactionForwardPremiInsuranceToAFGMMWPI "When it's Forward Premi Insurance to AFG MMWPI, transform to transaction PAS" salience 10 {
+    when
+        Acuan.TransactionType == "MMWPI"
+    then
+        JournalDebit1.Account = Acuan.SourceAccountId;
+        JournalDebit1.Narrative = "Forward Premi Insurance to AFG";
+        Journal.Transactions.Append(JournalDebit1);
+
+        JournalCredit1.Account = "114001000000005";
+        JournalCredit1.Narrative = "Forward Premi Insurance to AFG";
+        Journal.Transactions.Append(JournalCredit1);
+
+        Transaction.IsReadyToPublish = true;
+        Retract("TransformAcuanTransactionForwardPremiInsuranceToAFGMMWPI");
+}
+
+rule TransformAcuanTransactionForwardPremiInsuranceToAFGMWMPI "When it's Forward Premi Insurance to AFG MWMPI, transform to transaction PAS" salience 10 {
+    when
+        Acuan.TransactionType == "MWMPI"
+    then
+        JournalDebit1.Account = Acuan.SourceAccountId;
+        JournalDebit1.Narrative = "Forward Premi Insurance to AFG";
+        Journal.Transactions.Append(JournalDebit1);
+
+        JournalCredit1.Account = "114005000000007";
+        JournalCredit1.Narrative = "Forward Premi Insurance to AFG";
+        Journal.Transactions.Append(JournalCredit1);
+
+        Transaction.IsReadyToPublish = true;
+        Retract("TransformAcuanTransactionForwardPremiInsuranceToAFGMWMPI");
+}
+
 rule PublishJournalTransaction "When journal transaction is ready to publish, publish it" salience -1 {
     when
         Transaction.IsReadyToPublish == true
