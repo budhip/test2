@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"bitbucket.org/Amartha/go-megatron/internal/config"
-	"bitbucket.org/Amartha/go-megatron/internal/repository"
-
 	_ "github.com/lib/pq"
 )
 
@@ -40,7 +38,7 @@ func main() {
 	log.Println("✅ Database connected")
 
 	// Setup repository
-	repo := repository.NewRuleRepository(db)
+	repo := repositories.NewRuleRepository(db)
 
 	// Define rules to migrate
 	rulesDir := "./rules"
@@ -72,7 +70,7 @@ func main() {
 			}
 
 			// Create rule in database
-			rule := &repository.Rule{
+			rule := &repositories.Rule{
 				Name:     ruleFile,
 				Env:      env,
 				Version:  "latest",

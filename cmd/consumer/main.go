@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bitbucket.org/Amartha/go-megatron/internal/repositories"
 	"context"
 	"database/sql"
 	"fmt"
@@ -12,7 +13,6 @@ import (
 	"bitbucket.org/Amartha/go-megatron/internal/pkg/flag"
 	"bitbucket.org/Amartha/go-megatron/internal/pkg/graceful"
 	"bitbucket.org/Amartha/go-megatron/internal/pkg/metrics"
-	"bitbucket.org/Amartha/go-megatron/internal/repository"
 	"bitbucket.org/Amartha/go-megatron/internal/rules"
 
 	xlog "bitbucket.org/Amartha/go-x/log"
@@ -49,7 +49,7 @@ func main() {
 
 	// Setup rule loader to use database
 	log.Println("📚 Initializing rule loader...")
-	ruleRepo := repository.NewRuleRepository(db)
+	ruleRepo := repositories.NewRuleRepository(db)
 
 	// Use database loader (or hybrid if you want fallback to files)
 	rules.RuleLoaderVariable = rules.NewDatabaseRuleLoader(ruleRepo)

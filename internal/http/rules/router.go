@@ -1,12 +1,13 @@
 package rules
 
 import (
-	"bitbucket.org/Amartha/go-megatron/internal/repository"
+	"bitbucket.org/Amartha/go-megatron/internal/repositories"
+
 	"github.com/labstack/echo/v4"
 )
 
 // RegisterRoutes registers all rule management routes
-func RegisterRoutes(e *echo.Group, repo repository.RuleRepository) {
+func RegisterRoutes(e *echo.Group, repo repositories.RuleRepository) {
 	handler := NewHandler(repo)
 
 	rules := e.Group("/rules")

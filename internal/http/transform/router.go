@@ -1,17 +1,15 @@
 package transform
 
 import (
-	"bitbucket.org/Amartha/go-megatron/internal/service"
+	"bitbucket.org/Amartha/go-megatron/internal/services"
+
 	"github.com/labstack/echo/v4"
 )
 
 // RegisterRoutes registers all transformation routes
-func RegisterRoutes(e *echo.Group, transformService service.TransformService) {
+func RegisterRoutes(e *echo.Group, transformService services.TransformService) {
 	handler := NewHandler(transformService)
 
-	// POST /api/v1/transform - Transform single transaction
-	e.POST("/transform", handler.Transform)
-
-	// POST /api/v1/transform/batch - Transform multiple transactions
-	e.POST("/transform/batch", handler.BatchTransform)
+	// POST /api/v1/transform/wallet - Transform wallet transaction
+	e.POST("/transform/wallet", handler.TransformWalletTransaction)
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"bitbucket.org/Amartha/go-megatron/internal/repository"
 	xlog "bitbucket.org/Amartha/go-x/log"
 
 	"github.com/hyperjumptech/grule-rule-engine/pkg"
@@ -26,12 +25,12 @@ func (l FileRuleLoader) LoadRule(name, env, _ string) (pkg.Resource, error) {
 
 // DatabaseRuleLoader loads rules from database
 type DatabaseRuleLoader struct {
-	repo    repository.RuleRepository
+	repo    repositories.RuleRepository
 	timeout time.Duration
 }
 
 // NewDatabaseRuleLoader creates a new database rule loader
-func NewDatabaseRuleLoader(repo repository.RuleRepository) *DatabaseRuleLoader {
+func NewDatabaseRuleLoader(repo repositories.RuleRepository) *DatabaseRuleLoader {
 	return &DatabaseRuleLoader{
 		repo:    repo,
 		timeout: 5 * time.Second,
@@ -46,7 +45,7 @@ func (l *DatabaseRuleLoader) LoadRule(name, env, version string) (pkg.Resource, 
 		xlog.String("env", env),
 		xlog.String("version", version))
 
-	var rule *repository.Rule
+	var rule *repositories.Rule
 	var err error
 
 	// If version is "latest" or empty, get latest version
@@ -76,7 +75,7 @@ type HybridRuleLoader struct {
 }
 
 // NewHybridRuleLoader creates a new hybrid rule loader
-func NewHybridRuleLoader(repo repository.RuleRepository) *HybridRuleLoader {
+func NewHybridRuleLoader(repo repositories.RuleRepository) *HybridRuleLoader {
 	return &HybridRuleLoader{
 		dbLoader:   NewDatabaseRuleLoader(repo),
 		fileLoader: &FileRuleLoader{},

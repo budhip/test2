@@ -1,34 +1,37 @@
 package rules
 
 import (
+	"bitbucket.org/Amartha/go-megatron/internal/common/grule"
 	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"bitbucket.org/Amartha/go-megatron/internal/repository"
 	xlog "bitbucket.org/Amartha/go-x/log"
+
+	"bitbucket.org/Amartha/go-megatron/internal/models"
+	"bitbucket.org/Amartha/go-megatron/internal/repositories"
 
 	"github.com/labstack/echo/v4"
 )
 
 type Handler struct {
-	repo repository.RuleRepository
+	repo repositories.RuleRepository
 }
 
-func NewHandler(repo repository.RuleRepository) *Handler {
+func NewHandler(repo repositories.RuleRepository) *Handler {
 	return &Handler{repo: repo}
 }
 
 // CreateRule creates a new rule
 func (h *Handler) CreateRule(c echo.Context) error {
 	ctx := c.Request().Context()
-	var req CreateRuleRequest
+	var req models.CreateRuleRequest
 
 	if err := c.Bind(&req); err != nil {
 		xlog.Warn(ctx, "[RULES_HANDLER] Invalid request body", xlog.Err(err))
-		return c.JSON(http.StatusBadRequest, ErrorResponse{
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Invalid request body",
 			Message: err.Error(),
 		})
@@ -36,13 +39,22 @@ func (h *Handler) CreateRule(c echo.Context) error {
 
 	if err := req.Validate(); err != nil {
 		xlog.Warn(ctx, "[RULES_HANDLER] Validation failed", xlog.Err(err))
-		return c.JSON(http.StatusBadRequest, ErrorResponse{
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Validation failed",
 			Message: err.Error(),
 		})
 	}
 
-	rule := &repository.Rule{
+	// Validate Grule syntax
+	validator := grule.NewRuleValidator()
+	if err := validator.ValidateGruleSyntax(req.Content, req.Name); err != nil {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Invalid Grule syntax",
+			Message: err.Error(),
+		})
+	}
+
+	rule := &models.Rule{
 		Name:     req.Name,
 		Env:      req.Env,
 		Version:  req.Version,
@@ -52,7 +64,7 @@ func (h *Handler) CreateRule(c echo.Context) error {
 
 	if err := h.repo.CreateRule(ctx, rule); err != nil {
 		xlog.Error(ctx, "[RULES_HANDLER] Failed to create rule", xlog.Err(err))
-		return c.JSON(http.StatusInternalServerError, ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "Failed to create rule",
 			Message: err.Error(),
 		})
@@ -62,7 +74,7 @@ func (h *Handler) CreateRule(c echo.Context) error {
 		xlog.String("name", req.Name),
 		xlog.Int64("id", rule.ID))
 
-	return c.JSON(http.StatusCreated, toRuleResponse(rule))
+	return c.JSON(http.StatusCreated, models.ToRuleResponse(rule))
 }
 
 // GetRule gets a specific rule
@@ -74,7 +86,7 @@ func (h *Handler) GetRule(c echo.Context) error {
 
 	if name == "" || env == "" || version == "" {
 		xlog.Warn(ctx, "[RULES_HANDLER] Missing parameters")
-		return c.JSON(http.StatusBadRequest, ErrorResponse{
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Missing parameters",
 			Message: "name, env, and version are required",
 		})
@@ -83,13 +95,13 @@ func (h *Handler) GetRule(c echo.Context) error {
 	rule, err := h.repo.GetRule(ctx, name, env, version)
 	if err != nil {
 		xlog.Error(ctx, "[RULES_HANDLER] Failed to get rule", xlog.Err(err))
-		return c.JSON(http.StatusNotFound, ErrorResponse{
+		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Rule not found",
 			Message: err.Error(),
 		})
 	}
 
-	return c.JSON(http.StatusOK, toRuleResponse(rule))
+	return c.JSON(http.StatusOK, models.ToRuleResponse(rule))
 }
 
 // ListRules lists all rules for an environment
@@ -99,7 +111,7 @@ func (h *Handler) ListRules(c echo.Context) error {
 
 	if env == "" {
 		xlog.Warn(ctx, "[RULES_HANDLER] Missing env parameter")
-		return c.JSON(http.StatusBadRequest, ErrorResponse{
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Missing parameter",
 			Message: "env is required",
 		})
@@ -108,15 +120,15 @@ func (h *Handler) ListRules(c echo.Context) error {
 	rules, err := h.repo.ListRules(ctx, env)
 	if err != nil {
 		xlog.Error(ctx, "[RULES_HANDLER] Failed to list rules", xlog.Err(err))
-		return c.JSON(http.StatusInternalServerError, ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "Failed to list rules",
 			Message: err.Error(),
 		})
 	}
 
-	response := make([]RuleResponse, len(rules))
+	response := make([]models.RuleResponse, len(rules))
 	for i, rule := range rules {
-		response[i] = toRuleResponse(rule)
+		response[i] = models.ToRuleResponse(rule)
 	}
 
 	return c.JSON(http.StatusOK, response)
@@ -129,16 +141,16 @@ func (h *Handler) UpdateRule(c echo.Context) error {
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		xlog.Warn(ctx, "[RULES_HANDLER] Invalid ID", xlog.Err(err))
-		return c.JSON(http.StatusBadRequest, ErrorResponse{
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Invalid ID",
 			Message: err.Error(),
 		})
 	}
 
-	var req UpdateRuleRequest
+	var req models.UpdateRuleRequest
 	if err := c.Bind(&req); err != nil {
 		xlog.Warn(ctx, "[RULES_HANDLER] Invalid request body", xlog.Err(err))
-		return c.JSON(http.StatusBadRequest, ErrorResponse{
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Invalid request body",
 			Message: err.Error(),
 		})
@@ -146,20 +158,20 @@ func (h *Handler) UpdateRule(c echo.Context) error {
 
 	if err := req.Validate(); err != nil {
 		xlog.Warn(ctx, "[RULES_HANDLER] Validation failed", xlog.Err(err))
-		return c.JSON(http.StatusBadRequest, ErrorResponse{
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Validation failed",
 			Message: err.Error(),
 		})
 	}
 
-	rule := &repository.Rule{
+	rule := &models.Rule{
 		ID:      id,
 		Content: req.Content,
 	}
 
 	if err := h.repo.UpdateRule(ctx, rule); err != nil {
 		xlog.Error(ctx, "[RULES_HANDLER] Failed to update rule", xlog.Err(err))
-		return c.JSON(http.StatusInternalServerError, ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "Failed to update rule",
 			Message: err.Error(),
 		})
@@ -167,7 +179,7 @@ func (h *Handler) UpdateRule(c echo.Context) error {
 
 	xlog.Info(ctx, "[RULES_HANDLER] Rule updated successfully", xlog.Int64("id", id))
 
-	return c.JSON(http.StatusOK, MessageResponse{
+	return c.JSON(http.StatusOK, models.MessageResponse{
 		Message: "Rule updated successfully",
 	})
 }
@@ -179,7 +191,7 @@ func (h *Handler) DeleteRule(c echo.Context) error {
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		xlog.Warn(ctx, "[RULES_HANDLER] Invalid ID", xlog.Err(err))
-		return c.JSON(http.StatusBadRequest, ErrorResponse{
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Invalid ID",
 			Message: err.Error(),
 		})
@@ -187,7 +199,7 @@ func (h *Handler) DeleteRule(c echo.Context) error {
 
 	if err := h.repo.DeleteRule(ctx, id); err != nil {
 		xlog.Error(ctx, "[RULES_HANDLER] Failed to delete rule", xlog.Err(err))
-		return c.JSON(http.StatusInternalServerError, ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "Failed to delete rule",
 			Message: err.Error(),
 		})
@@ -195,37 +207,9 @@ func (h *Handler) DeleteRule(c echo.Context) error {
 
 	xlog.Info(ctx, "[RULES_HANDLER] Rule deleted successfully", xlog.Int64("id", id))
 
-	return c.JSON(http.StatusOK, MessageResponse{
+	return c.JSON(http.StatusOK, models.MessageResponse{
 		Message: "Rule deleted successfully",
 	})
-}
-
-func (r *AppendRuleRequest) Validate() error {
-	if r.Content == "" {
-		return fmt.Errorf("content is required")
-	}
-
-	// Validate insert mode
-	validModes := map[string]bool{
-		"end":       true,
-		"beginning": true,
-		"salience":  true,
-	}
-	if r.InsertMode != "" && !validModes[r.InsertMode] {
-		return fmt.Errorf("insert_mode must be one of: end, beginning, salience")
-	}
-
-	// Validate version bump
-	validBumps := map[string]bool{
-		"major": true,
-		"minor": true,
-		"patch": true,
-	}
-	if r.VersionBump != "" && !validBumps[r.VersionBump] {
-		return fmt.Errorf("version_bump must be one of: major, minor, patch")
-	}
-
-	return nil
 }
 
 // AppendRule appends a new rule to existing content without replacing
@@ -236,23 +220,23 @@ func (h *Handler) AppendRule(c echo.Context) error {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, ErrorResponse{
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Invalid rule ID",
 			Message: err.Error(),
 		})
 	}
 
 	// Parse request
-	var req AppendRuleRequest
+	var req models.AppendRuleRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, ErrorResponse{
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Invalid request body",
 			Message: err.Error(),
 		})
 	}
 
 	if err := req.Validate(); err != nil {
-		return c.JSON(http.StatusBadRequest, ErrorResponse{
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Validation failed",
 			Message: err.Error(),
 		})
@@ -275,7 +259,7 @@ func (h *Handler) AppendRule(c echo.Context) error {
 	existingRule, err := h.repo.GetRuleByID(ctx, id)
 	if err != nil {
 		xlog.Error(ctx, "[RULES_HANDLER] Failed to get rule", xlog.Err(err))
-		return c.JSON(http.StatusNotFound, ErrorResponse{
+		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Rule not found",
 			Message: err.Error(),
 		})
@@ -289,7 +273,7 @@ func (h *Handler) AppendRule(c echo.Context) error {
 	)
 	if err != nil {
 		xlog.Error(ctx, "[RULES_HANDLER] Failed to merge content", xlog.Err(err))
-		return c.JSON(http.StatusInternalServerError, ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "Failed to merge content",
 			Message: err.Error(),
 		})
@@ -311,7 +295,7 @@ func (h *Handler) AppendRule(c echo.Context) error {
 
 	if err := h.repo.UpdateRule(ctx, existingRule); err != nil {
 		xlog.Error(ctx, "[RULES_HANDLER] Failed to update rule", xlog.Err(err))
-		return c.JSON(http.StatusInternalServerError, ErrorResponse{
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "Failed to update rule",
 			Message: err.Error(),
 		})
@@ -327,7 +311,7 @@ func (h *Handler) AppendRule(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message":     "Rule appended successfully",
-		"rule":        toRuleResponse(existingRule),
+		"rule":        models.ToRuleResponse(existingRule),
 		"old_version": existingRule.Version,
 		"new_version": newVersion,
 		"added_rules": addedRules,

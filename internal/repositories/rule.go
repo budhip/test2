@@ -1,22 +1,24 @@
-package repository
+package repositories
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
 
+	"bitbucket.org/Amartha/go-megatron/internal/models"
+
 	xlog "bitbucket.org/Amartha/go-x/log"
 )
 
 // RuleRepository defines the interface for rule data access
 type RuleRepository interface {
-	GetRule(ctx context.Context, name, env, version string) (*Rule, error)
-	GetRuleByID(ctx context.Context, id int64) (*Rule, error)
-	CreateRule(ctx context.Context, rule *Rule) error
-	UpdateRule(ctx context.Context, rule *Rule) error
+	GetRule(ctx context.Context, name, env, version string) (*models.Rule, error)
+	GetRuleByID(ctx context.Context, id int64) (*models.Rule, error)
+	CreateRule(ctx context.Context, rule *models.Rule) error
+	UpdateRule(ctx context.Context, rule *models.Rule) error
 	DeleteRule(ctx context.Context, id int64) error
-	ListRules(ctx context.Context, env string) ([]*Rule, error)
-	GetLatestRule(ctx context.Context, name, env string) (*Rule, error)
+	ListRules(ctx context.Context, env string) ([]*models.Rule, error)
+	GetLatestRule(ctx context.Context, name, env string) (*models.Rule, error)
 }
 
 type ruleRepository struct {
@@ -29,7 +31,7 @@ func NewRuleRepository(db *sql.DB) RuleRepository {
 }
 
 // GetRule retrieves a rule by name, environment, and version
-func (r *ruleRepository) GetRule(ctx context.Context, name, env, version string) (*Rule, error) {
+func (r *ruleRepository) GetRule(ctx context.Context, name, env, version string) (*models.Rule, error) {
 	query := `
 		SELECT id, name, env, version, content, is_active, created_at, updated_at
 		FROM rules
@@ -41,7 +43,7 @@ func (r *ruleRepository) GetRule(ctx context.Context, name, env, version string)
 		xlog.String("env", env),
 		xlog.String("version", version))
 
-	var rule Rule
+	var rule models.Rule
 	err := r.db.QueryRowContext(ctx, query, name, env, version).Scan(
 		&rule.ID,
 		&rule.Name,
@@ -67,7 +69,7 @@ func (r *ruleRepository) GetRule(ctx context.Context, name, env, version string)
 }
 
 // GetRuleByID retrieves a rule by its ID
-func (r *ruleRepository) GetRuleByID(ctx context.Context, id int64) (*Rule, error) {
+func (r *ruleRepository) GetRuleByID(ctx context.Context, id int64) (*models.Rule, error) {
 	query := `
 		SELECT id, name, env, version, content, is_active, created_at, updated_at
 		FROM rules
@@ -76,7 +78,7 @@ func (r *ruleRepository) GetRuleByID(ctx context.Context, id int64) (*Rule, erro
 
 	xlog.Info(ctx, "[RULE_REPOSITORY] Getting rule by ID", xlog.Int64("id", id))
 
-	var rule Rule
+	var rule models.Rule
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&rule.ID,
 		&rule.Name,
@@ -104,7 +106,7 @@ func (r *ruleRepository) GetRuleByID(ctx context.Context, id int64) (*Rule, erro
 }
 
 // CreateRule creates a new rule in the database
-func (r *ruleRepository) CreateRule(ctx context.Context, rule *Rule) error {
+func (r *ruleRepository) CreateRule(ctx context.Context, rule *models.Rule) error {
 	query := `
 		INSERT INTO rules (name, env, version, content, is_active)
 		VALUES ($1, $2, $3, $4, $5)
@@ -136,7 +138,7 @@ func (r *ruleRepository) CreateRule(ctx context.Context, rule *Rule) error {
 }
 
 // UpdateRule updates an existing rule
-func (r *ruleRepository) UpdateRule(ctx context.Context, rule *Rule) error {
+func (r *ruleRepository) UpdateRule(ctx context.Context, rule *models.Rule) error {
 	query := `
 		UPDATE rules
 		SET content = $1, version = $2, updated_at = CURRENT_TIMESTAMP
@@ -198,7 +200,7 @@ func (r *ruleRepository) DeleteRule(ctx context.Context, id int64) error {
 }
 
 // ListRules retrieves all active rules for a specific environment
-func (r *ruleRepository) ListRules(ctx context.Context, env string) ([]*Rule, error) {
+func (r *ruleRepository) ListRules(ctx context.Context, env string) ([]*models.Rule, error) {
 	query := `
 		SELECT id, name, env, version, content, is_active, created_at, updated_at
 		FROM rules
@@ -215,9 +217,9 @@ func (r *ruleRepository) ListRules(ctx context.Context, env string) ([]*Rule, er
 	}
 	defer rows.Close()
 
-	var rules []*Rule
+	var rules []*models.Rule
 	for rows.Next() {
-		var rule Rule
+		var rule models.Rule
 		err := rows.Scan(
 			&rule.ID,
 			&rule.Name,
@@ -244,7 +246,7 @@ func (r *ruleRepository) ListRules(ctx context.Context, env string) ([]*Rule, er
 	return rules, nil
 }
 
-func (r *ruleRepository) GetLatestRule(ctx context.Context, name, env string) (*Rule, error) {
+func (r *ruleRepository) GetLatestRule(ctx context.Context, name, env string) (*models.Rule, error) {
 	query := `
 		SELECT id, name, env, version, content, is_active, created_at, updated_at
 		FROM rules
@@ -257,7 +259,7 @@ func (r *ruleRepository) GetLatestRule(ctx context.Context, name, env string) (*
 		xlog.String("name", name),
 		xlog.String("env", env))
 
-	var rule Rule
+	var rule models.Rule
 	err := r.db.QueryRowContext(ctx, query, name, env).Scan(
 		&rule.ID,
 		&rule.Name,

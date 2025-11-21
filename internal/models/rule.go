@@ -1,11 +1,22 @@
-package rules
+package models
 
 import (
 	"errors"
+	"fmt"
 	"time"
-
-	"bitbucket.org/Amartha/go-megatron/internal/repository"
 )
+
+// Rule represents a rule entity in the database
+type Rule struct {
+	ID        int64     `db:"id"`
+	Name      string    `db:"name"`
+	Env       string    `db:"env"`
+	Version   string    `db:"version"`
+	Content   string    `db:"content"`
+	IsActive  bool      `db:"is_active"`
+	CreatedAt time.Time `db:"created_at"`
+	UpdatedAt time.Time `db:"updated_at"`
+}
 
 // CreateRuleRequest represents the request to create a new rule
 type CreateRuleRequest struct {
@@ -65,19 +76,13 @@ type RuleResponse struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// ErrorResponse represents an error response
-type ErrorResponse struct {
-	Error   string `json:"error"`
-	Message string `json:"message"`
-}
-
 // MessageResponse represents a simple message response
 type MessageResponse struct {
 	Message string `json:"message"`
 }
 
-// toRuleResponse converts a repository.Rule to RuleResponse
-func toRuleResponse(rule *repository.Rule) RuleResponse {
+// ToRuleResponse converts a repository.Rule to RuleResponse
+func ToRuleResponse(rule *Rule) RuleResponse {
 	return RuleResponse{
 		ID:        rule.ID,
 		Name:      rule.Name,
@@ -96,4 +101,32 @@ type AppendRuleRequest struct {
 	AutoVersion bool   `json:"auto_version" example:"true"`            // Auto-increment version
 	VersionBump string `json:"version_bump,omitempty" example:"patch"` // major, minor, patch
 	InsertMode  string `json:"insert_mode,omitempty" example:"end"`    // end, salience, beginning
+}
+
+func (r *AppendRuleRequest) Validate() error {
+	if r.Content == "" {
+		return fmt.Errorf("content is required")
+	}
+
+	// Validate insert mode
+	validModes := map[string]bool{
+		"end":       true,
+		"beginning": true,
+		"salience":  true,
+	}
+	if r.InsertMode != "" && !validModes[r.InsertMode] {
+		return fmt.Errorf("insert_mode must be one of: end, beginning, salience")
+	}
+
+	// Validate version bump
+	validBumps := map[string]bool{
+		"major": true,
+		"minor": true,
+		"patch": true,
+	}
+	if r.VersionBump != "" && !validBumps[r.VersionBump] {
+		return fmt.Errorf("version_bump must be one of: major, minor, patch")
+	}
+
+	return nil
 }

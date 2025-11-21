@@ -1,16 +1,16 @@
 package http
 
 import (
-	"bitbucket.org/Amartha/go-megatron/internal/acuanrepository"
 	"context"
 	"fmt"
 
-	"bitbucket.org/Amartha/go-megatron/internal/config"
 	rulesHttp "bitbucket.org/Amartha/go-megatron/internal/http/rules"
 	transformHttp "bitbucket.org/Amartha/go-megatron/internal/http/transform"
+
+	"bitbucket.org/Amartha/go-megatron/internal/config"
 	"bitbucket.org/Amartha/go-megatron/internal/pkg/graceful"
-	"bitbucket.org/Amartha/go-megatron/internal/repository"
-	"bitbucket.org/Amartha/go-megatron/internal/service"
+	"bitbucket.org/Amartha/go-megatron/internal/repositories"
+	"bitbucket.org/Amartha/go-megatron/internal/services"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -19,15 +19,15 @@ import (
 type httpAPI struct {
 	e                *echo.Echo
 	cfg              *config.Configuration
-	ruleRepo         repository.RuleRepository
-	acuanRuleRepo    acuanrepository.RuleRepository
-	transformService service.TransformService
+	ruleRepo         repositories.RuleRepository
+	acuanRuleRepo    repositories.AcuanRuleRepository
+	transformService services.TransformService
 }
 
 // NewAPI creates a new HTTP API server
-func NewAPI(cfg *config.Configuration, acuanRuleRepo acuanrepository.RuleRepository, ruleRepo repository.RuleRepository) Http {
-	// Create transform service
-	transformService := service.NewTransformService(acuanRuleRepo)
+func NewAPI(cfg *config.Configuration, acuanRuleRepo repositories.AcuanRuleRepository, ruleRepo repositories.RuleRepository) Http {
+	// Create transform service (supports both Grule and JSON config)
+	transformService := services.NewTransformService(acuanRuleRepo)
 
 	return &httpAPI{
 		e:                echo.New(),
@@ -58,19 +58,26 @@ func (h *httpAPI) Start() (graceful.ProcessStarter, graceful.ProcessStopper) {
 	h.e.GET("/", func(c echo.Context) error {
 		return c.JSON(200, map[string]interface{}{
 			"service": "Go Megatron API Server",
-			"version": "1.0.0",
+			"version": "2.0.0",
 			"env":     h.cfg.App.Env,
+			"features": map[string]string{
+				"grule_engine":    "enabled",
+				"json_config":     "enabled (legacy)",
+				"transformation":  "v2 with Grule support",
+				"rule_management": "enabled",
+			},
 			"endpoints": map[string][]string{
 				"transform": {
-					"POST /api/v1/transform",
-					"POST /api/v1/transform/batch",
+					"POST /api/v1/transform/wallet (NEW - Grule based)",
+					"POST /api/v1/transform (legacy - JSON config)",
+					"POST /api/v1/transform/batch (legacy - JSON config)",
 				},
 				"rules": {
-					"POST /api/v1/rules",
-					"GET /api/v1/rules",
-					"GET /api/v1/rules/:name",
-					"PUT /api/v1/rules/:id",
-					"PATCH /api/v1/rules/:id/append",
+					"POST   /api/v1/rules",
+					"GET    /api/v1/rules",
+					"GET    /api/v1/rules/:name",
+					"PUT    /api/v1/rules/:id",
+					"PATCH  /api/v1/rules/:id/append",
 					"DELETE /api/v1/rules/:id",
 				},
 			},
@@ -81,13 +88,14 @@ func (h *httpAPI) Start() (graceful.ProcessStarter, graceful.ProcessStopper) {
 	h.e.GET("/health", func(c echo.Context) error {
 		return c.JSON(200, map[string]string{
 			"status": "healthy",
+			"engine": "grule + json-config",
 		})
 	})
 
 	// API v1 routes
 	v1 := h.e.Group("/api/v1")
 
-	// Register transformation routes
+	// Register transformation routes (Grule + legacy)
 	transformHttp.RegisterRoutes(v1, h.transformService)
 
 	// Register rules management routes
@@ -101,6 +109,8 @@ func (h *httpAPI) Start() (graceful.ProcessStarter, graceful.ProcessStopper) {
 
 	return func() error {
 			fmt.Printf("🚀 API Server starting on %s (env: %s)\n", port, h.cfg.App.Env)
+			fmt.Println("   ⚡ Grule engine: ENABLED")
+			fmt.Println("   📦 JSON config engine: ENABLED (legacy)")
 			return h.e.Start(port)
 		},
 		func(ctx context.Context) error {

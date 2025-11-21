@@ -12,9 +12,7 @@ import (
 
 	"bitbucket.org/Amartha/go-megatron/internal/config"
 	"bitbucket.org/Amartha/go-megatron/internal/http"
-	"bitbucket.org/Amartha/go-megatron/internal/repository"
-
-	"bitbucket.org/Amartha/go-megatron/internal/acuanrepository"
+	"bitbucket.org/Amartha/go-megatron/internal/repositories"
 
 	_ "github.com/lib/pq"
 )
@@ -22,10 +20,8 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// ASCII banner
 	printBanner()
 
-	// Load config
 	log.Println("📝 Loading configuration...")
 	cfg, err := config.New(ctx)
 	if err != nil {
@@ -33,7 +29,6 @@ func main() {
 	}
 	log.Printf("✅ Configuration loaded (env: %s)\n", cfg.App.Env)
 
-	// Setup database
 	log.Println("🔌 Connecting to database...")
 	db, err := setupDatabase(cfg)
 	if err != nil {
@@ -42,15 +37,12 @@ func main() {
 	defer db.Close()
 	log.Println("✅ Database connected successfully")
 
-	// Setup repositories
-	ruleRepo := repository.NewRuleRepository(db)
-	acuanRulerepo := acuanrepository.NewRuleRepository(db)
+	ruleRepo := repositories.NewRuleRepository(db)
+	acuanRulerepo := repositories.NewAcuanRuleRepository(db)
 
-	// Setup HTTP API
 	apiServer := http.NewAPI(cfg, acuanRulerepo, ruleRepo)
 	starter, stopper := apiServer.Start()
 
-	// Start server in goroutine
 	go func() {
 		if err := starter(); err != nil {
 			log.Fatal("❌ Failed to start API server:", err)
@@ -62,6 +54,7 @@ func main() {
 	log.Println("\n   🔄 Transformation:")
 	log.Println("   - POST /api/v1/transform")
 	log.Println("   - POST /api/v1/transform/batch")
+	log.Println("   - POST /api/v1/transform/wallet")
 	log.Println("\n   📋 Rules Management:")
 	log.Println("   - POST   /api/v1/rules")
 	log.Println("   - GET    /api/v1/rules")
@@ -71,14 +64,12 @@ func main() {
 	log.Println("   - DELETE /api/v1/rules/:id")
 	log.Println("\n⌨️  Press Ctrl+C to stop")
 
-	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	log.Println("\n⏳ Received shutdown signal...")
 
-	// Graceful shutdown with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -104,12 +95,10 @@ func setupDatabase(cfg *config.Configuration) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Set connection pool settings
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
-	// Test connection with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

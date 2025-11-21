@@ -1,20 +1,20 @@
-package transformer
+package services
 
 import (
+	"bitbucket.org/Amartha/go-megatron/internal/repositories"
+
 	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
-	"bitbucket.org/Amartha/go-megatron/internal/models"
-	"bitbucket.org/Amartha/go-megatron/internal/repositories"
-
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+
+	models "bitbucket.org/Amartha/go-megatron/internal/models"
 )
 
-// Engine adalah rule engine untuk execute transformation
 type Engine struct {
 	ruleRepo repositories.AcuanRuleRepository
 	config   Config
@@ -32,28 +32,212 @@ func NewEngine(ruleRepo repositories.AcuanRuleRepository, config Config) *Engine
 	}
 }
 
+// TransformWalletTransaction transforms wallet transaction to acuan transactions
+func (e *Engine) TransformWalletTransaction(ctx context.Context, req models.WalletTransactionRequest) (*models.WalletTransactionResponse, error) {
+	startTime := time.Now()
+
+	var allTransactions []models.TransactionReq
+
+	// Transform NetAmount
+	if !req.WalletTransaction.NetAmount.Value.IsZero() {
+		rule, err := e.ruleRepo.GetActiveRule(ctx, req.WalletTransaction.TransactionType)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get rule for %s: %w", req.WalletTransaction.TransactionType, err)
+		}
+
+		var config models.AcuanRuleConfig
+		if err := json.Unmarshal(rule.Config, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse rule config: %w", err)
+		}
+
+		transactions, err := e.executeWalletTransformation(ctx, req, config, req.WalletTransaction.NetAmount.Value, req.WalletTransaction.TransactionType)
+		if err != nil {
+			return nil, fmt.Errorf("transformation failed for net amount: %w", err)
+		}
+		allTransactions = append(allTransactions, transactions...)
+	}
+
+	// Transform Amounts array
+	for _, amountItem := range req.WalletTransaction.Amounts {
+		if amountItem.Amount.Value.IsZero() {
+			continue
+		}
+
+		rule, err := e.ruleRepo.GetActiveRule(ctx, amountItem.Type)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get rule for %s: %w", amountItem.Type, err)
+		}
+
+		var config models.AcuanRuleConfig
+		if err := json.Unmarshal(rule.Config, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse rule config: %w", err)
+		}
+
+		transactions, err := e.executeWalletTransformation(ctx, req, config, amountItem.Amount.Value, amountItem.Type)
+		if err != nil {
+			return nil, fmt.Errorf("transformation failed for %s: %w", amountItem.Type, err)
+		}
+		allTransactions = append(allTransactions, transactions...)
+	}
+
+	executionTime := time.Since(startTime)
+
+	return &models.WalletTransactionResponse{
+		Transactions: allTransactions,
+		Metadata: models.TransformMetadata{
+			ExecutionTimeMs: int(executionTime.Milliseconds()),
+		},
+	}, nil
+}
+
+func (e *Engine) executeWalletTransformation(ctx context.Context, req models.WalletTransactionRequest, config models.AcuanRuleConfig, amount decimal.Decimal, transactionType string) ([]models.TransactionReq, error) {
+	var results []models.TransactionReq
+
+	for _, txConfig := range config.Transactions {
+		tx, err := e.buildWalletTransaction(req, txConfig, amount, transactionType)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, tx)
+	}
+
+	return results, nil
+}
+
+func (e *Engine) buildWalletTransaction(req models.WalletTransactionRequest, txConfig models.AcuanTransactionConfig, amount decimal.Decimal, transactionType string) (models.TransactionReq, error) {
+	tx := models.TransactionReq{
+		TransactionID:   uuid.New().String(),
+		TransactionTime: req.WalletTransaction.TransactionTime,
+		OrderTime:       req.WalletTransaction.CreatedAt,
+		Currency:        e.resolveCurrency(req.WalletTransaction.NetAmount.Currency),
+		Status:          e.transformStatus(req.WalletTransaction.Status),
+		RefNumber:       req.WalletTransaction.RefNumber,
+		Description:     req.WalletTransaction.Description,
+		Metadata:        req.WalletTransaction.Metadata,
+	}
+
+	// Resolve FromAccount
+	fromAccount, err := e.resolveWalletAccount(req, txConfig.FromAccount)
+	if err != nil {
+		return tx, fmt.Errorf("failed to resolve fromAccount: %w", err)
+	}
+	tx.FromAccount = fromAccount
+
+	// Resolve ToAccount
+	toAccount, err := e.resolveWalletAccount(req, txConfig.ToAccount)
+	if err != nil {
+		return tx, fmt.Errorf("failed to resolve toAccount: %w", err)
+	}
+	tx.ToAccount = toAccount
+
+	// Set Amount
+	tx.Amount = amount
+
+	// Set transaction type and order type
+	tx.TypeTransaction = transactionType
+	tx.OrderType = txConfig.OrderType
+
+	// Resolve TransactionDate
+	tx.TransactionDate = req.WalletTransaction.TransactionTime.Format("2006-01-02")
+
+	// Add entity to metadata if available
+	if entity, ok := req.WalletTransaction.Metadata["entity"]; ok {
+		if tx.Metadata == nil {
+			tx.Metadata = make(map[string]interface{})
+		}
+		tx.Metadata["entity"] = entity
+	}
+
+	return tx, nil
+}
+
+func (e *Engine) resolveWalletAccount(req models.WalletTransactionRequest, config models.AcuanAccountConfig) (string, error) {
+	switch config.Type {
+	case "config":
+		return e.getWalletConfig(req.Context, config.Path)
+	case "input":
+		return e.resolveWalletValue(req, config.Source)
+	default:
+		return "", fmt.Errorf("unsupported account type: %s", config.Type)
+	}
+}
+
+func (e *Engine) resolveWalletValue(req models.WalletTransactionRequest, path string) (string, error) {
+	parts := strings.Split(path, ".")
+
+	if parts[0] == "walletTransaction" {
+		if len(parts) < 2 {
+			return "", fmt.Errorf("invalid path: %s", path)
+		}
+
+		switch parts[1] {
+		case "id":
+			return req.WalletTransaction.ID, nil
+		case "accountNumber":
+			return req.WalletTransaction.AccountNumber, nil
+		case "destinationAccountNumber":
+			return req.WalletTransaction.DestinationAccountNumber, nil
+		case "refNumber":
+			return req.WalletTransaction.RefNumber, nil
+		case "description":
+			return req.WalletTransaction.Description, nil
+		case "transactionType":
+			return req.WalletTransaction.TransactionType, nil
+		case "transactionFlow":
+			return req.WalletTransaction.TransactionFlow, nil
+		case "status":
+			return req.WalletTransaction.Status, nil
+		case "metadata":
+			if len(parts) < 3 {
+				return "", fmt.Errorf("invalid metadata path: %s", path)
+			}
+			metadataKey := parts[2]
+			if value, ok := req.WalletTransaction.Metadata[metadataKey]; ok {
+				return fmt.Sprintf("%v", value), nil
+			}
+			return "", fmt.Errorf("metadata key not found: %s", metadataKey)
+		default:
+			return "", fmt.Errorf("unsupported walletTransaction field: %s", parts[1])
+		}
+	}
+
+	return "", fmt.Errorf("unsupported path: %s", path)
+}
+
+func (e *Engine) getWalletConfig(ctx models.TransformContext, path string) (string, error) {
+	switch path {
+	case "AccountConfig.SystemAccountNumber":
+		return ctx.SystemAccountNumber, nil
+	default:
+		return "", fmt.Errorf("unsupported config path: %s", path)
+	}
+}
+
+func (e *Engine) transformStatus(status string) string {
+	if status == "SUCCESS" {
+		return "1"
+	}
+	return "0"
+}
+
 // Transform executes transformation based on rule
 func (e *Engine) Transform(ctx context.Context, req models.TransformRequest) (*models.TransformResponse, error) {
 	startTime := time.Now()
 
-	// Get active rule untuk transaction type
 	rule, err := e.ruleRepo.GetActiveRule(ctx, req.TransactionType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get rule for %s: %w", req.TransactionType, err)
 	}
 
-	// Parse rule config
-	var config RuleConfig
+	var config models.AcuanRuleConfig
 	if err := json.Unmarshal(rule.Config, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse rule config: %w", err)
 	}
 
-	// Validate input
 	if err := e.validate(req, config); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
-	// Execute transformation
 	transactions, err := e.executeTransformation(ctx, req, config)
 	if err != nil {
 		return nil, fmt.Errorf("transformation failed: %w", err)
@@ -72,8 +256,7 @@ func (e *Engine) Transform(ctx context.Context, req models.TransformRequest) (*m
 	}, nil
 }
 
-// executeTransformation menjalankan actual transformation
-func (e *Engine) executeTransformation(ctx context.Context, req models.TransformRequest, config RuleConfig) ([]models.TransactionOutput, error) {
+func (e *Engine) executeTransformation(ctx context.Context, req models.TransformRequest, config models.AcuanRuleConfig) ([]models.TransactionOutput, error) {
 	var results []models.TransactionOutput
 
 	for _, txConfig := range config.Transactions {
@@ -87,8 +270,7 @@ func (e *Engine) executeTransformation(ctx context.Context, req models.Transform
 	return results, nil
 }
 
-// buildTransaction membuat transaction berdasarkan config
-func (e *Engine) buildTransaction(req models.TransformRequest, txConfig TransactionConfig) (models.TransactionOutput, error) {
+func (e *Engine) buildTransaction(req models.TransformRequest, txConfig models.AcuanTransactionConfig) (models.TransactionOutput, error) {
 	tx := models.TransactionOutput{
 		TransactionID:   uuid.New().String(),
 		TransactionTime: req.ParentTransaction.TransactionTime,
@@ -98,42 +280,35 @@ func (e *Engine) buildTransaction(req models.TransformRequest, txConfig Transact
 		RefNumber:       req.ParentTransaction.RefNumber,
 	}
 
-	// Resolve FromAccount
 	fromAccount, err := e.resolveAccount(req, txConfig.FromAccount)
 	if err != nil {
 		return tx, fmt.Errorf("failed to resolve fromAccount: %w", err)
 	}
 	tx.FromAccount = fromAccount
 
-	// Resolve ToAccount
 	toAccount, err := e.resolveAccount(req, txConfig.ToAccount)
 	if err != nil {
 		return tx, fmt.Errorf("failed to resolve toAccount: %w", err)
 	}
 	tx.ToAccount = toAccount
 
-	// Resolve Amount
 	amount, err := e.resolveAmount(req, txConfig.Amount)
 	if err != nil {
 		return tx, fmt.Errorf("failed to resolve amount: %w", err)
 	}
 	tx.Amount = amount
 
-	// Set static fields
 	tx.TypeTransaction = txConfig.TransactionType
 	tx.OrderType = txConfig.OrderType
 
-	// Resolve Description
 	description, err := e.resolveDescription(req, txConfig.Description)
 	if err != nil {
 		return tx, fmt.Errorf("failed to resolve description: %w", err)
 	}
 	tx.Description = description
 
-	// Resolve TransactionDate
 	tx.TransactionDate = req.ParentTransaction.TransactionTime.Format("2006-01-02")
 
-	// Resolve Metadata
 	metadata, err := e.resolveMetadata(req, txConfig.Metadata)
 	if err != nil {
 		return tx, fmt.Errorf("failed to resolve metadata: %w", err)
@@ -143,22 +318,18 @@ func (e *Engine) buildTransaction(req models.TransformRequest, txConfig Transact
 	return tx, nil
 }
 
-// resolveAccount resolves account berdasarkan config
-func (e *Engine) resolveAccount(req models.TransformRequest, config AccountConfig) (string, error) {
+func (e *Engine) resolveAccount(req models.TransformRequest, config models.AcuanAccountConfig) (string, error) {
 	switch config.Type {
 	case "config":
-		// Get from context config
 		return e.getFromConfig(req.Context, config.Path)
 
 	case "dynamic":
 		if config.Source == "entity" {
-			// Get entity from parent transaction
 			entity := req.ParentTransaction.Account.Entity
 			if entity == "" {
 				return "", fmt.Errorf("entity not found in parent transaction account")
 			}
 
-			// Map entity to actual entity code
 			if config.Mapping.EntitySource != "" {
 				mappedEntity, err := e.resolveValue(req, config.Mapping.EntitySource)
 				if err == nil && mappedEntity != "" {
@@ -166,7 +337,6 @@ func (e *Engine) resolveAccount(req models.TransformRequest, config AccountConfi
 				}
 			}
 
-			// Get account number from mapping
 			configPath := config.Mapping.ConfigPath
 			mapping, err := e.getConfigMapping(req.Context, configPath)
 			if err != nil {
@@ -180,12 +350,9 @@ func (e *Engine) resolveAccount(req models.TransformRequest, config AccountConfi
 			return accountNumber, nil
 		}
 
-		// Resolve from other sources
 		return e.resolveValue(req, config.Source)
 
 	case "input":
-		// Get from parent transaction using path
-		// ← PERBAIKAN DI SINI: Gunakan resolveValue untuk handle semua input paths
 		return e.resolveValue(req, config.Source)
 
 	default:
@@ -193,19 +360,15 @@ func (e *Engine) resolveAccount(req models.TransformRequest, config AccountConfi
 	}
 }
 
-// resolveAmount resolves amount berdasarkan config
-func (e *Engine) resolveAmount(req models.TransformRequest, config AmountConfig) (decimal.Decimal, error) {
+func (e *Engine) resolveAmount(req models.TransformRequest, config models.AcuanAmountConfig) (decimal.Decimal, error) {
 	switch config.Type {
 	case "input":
-		// Use amount dari request
 		return req.Amount.Value, nil
 
 	case "static":
-		// Parse static value
 		return decimal.NewFromString(config.Value)
 
 	case "calculate":
-		// TODO: Implement calculation logic
 		return decimal.Zero, fmt.Errorf("calculation not yet implemented")
 
 	default:
@@ -213,14 +376,12 @@ func (e *Engine) resolveAmount(req models.TransformRequest, config AmountConfig)
 	}
 }
 
-// resolveDescription resolves description berdasarkan config
-func (e *Engine) resolveDescription(req models.TransformRequest, config DescriptionConfig) (string, error) {
+func (e *Engine) resolveDescription(req models.TransformRequest, config models.AcuanDescriptionConfig) (string, error) {
 	switch config.Type {
 	case "static":
 		return config.Value, nil
 
 	case "template":
-		// Simple template replacement
 		result := config.Template
 		result = strings.ReplaceAll(result, "{{parentTransaction.accountNumber}}", req.ParentTransaction.AccountNumber)
 		result = strings.ReplaceAll(result, "{{parentTransaction.destinationAccountNumber}}", req.ParentTransaction.DestinationAccountNumber)
@@ -228,7 +389,6 @@ func (e *Engine) resolveDescription(req models.TransformRequest, config Descript
 		result = strings.ReplaceAll(result, "{{parentTransaction.description}}", req.ParentTransaction.Description)
 		result = strings.ReplaceAll(result, "{{parentTransaction.transactionType}}", req.ParentTransaction.TransactionType)
 
-		// Handle metadata templates: {{parentTransaction.metadata.loan_account_number}}
 		for key, value := range req.ParentTransaction.Metadata {
 			placeholder := fmt.Sprintf("{{parentTransaction.metadata.%s}}", key)
 			result = strings.ReplaceAll(result, placeholder, fmt.Sprintf("%v", value))
@@ -237,9 +397,7 @@ func (e *Engine) resolveDescription(req models.TransformRequest, config Descript
 		return result, nil
 
 	case "input":
-		// Get description from input path
 		if config.Source == "" {
-			// Default to parentTransaction.description if no source specified
 			return req.ParentTransaction.Description, nil
 		}
 		return e.resolveValue(req, config.Source)
@@ -249,32 +407,26 @@ func (e *Engine) resolveDescription(req models.TransformRequest, config Descript
 	}
 }
 
-// resolveMetadata resolves metadata berdasarkan config
-func (e *Engine) resolveMetadata(req models.TransformRequest, config MetadataConfig) (map[string]interface{}, error) {
+func (e *Engine) resolveMetadata(req models.TransformRequest, config models.AcuanMetadataConfig) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 
 	switch config.Type {
 	case "merge":
-		// Merge dari berbagai sources
 		for _, source := range config.Sources {
 			if sourceStr, ok := source.(string); ok {
-				// It's a path reference
 				if sourceStr == "parentTransaction.metadata" {
 					for k, v := range req.ParentTransaction.Metadata {
 						result[k] = v
 					}
 				} else {
-					// Try to resolve as path
+					parts := strings.Split(sourceStr, ".")
+					key := parts[len(parts)-1]
 					value, err := e.resolveValue(req, sourceStr)
 					if err == nil && value != "" {
-						// Extract key name from path (e.g., "loan_account_number" from path)
-						parts := strings.Split(sourceStr, ".")
-						key := parts[len(parts)-1]
 						result[key] = value
 					}
 				}
 			} else if sourceMap, ok := source.(map[string]interface{}); ok {
-				// It's a dynamic config
 				if sourceMap["type"] == "dynamic" {
 					field := sourceMap["field"].(string)
 					sourcePath := sourceMap["source"].(string)
@@ -295,8 +447,6 @@ func (e *Engine) resolveMetadata(req models.TransformRequest, config MetadataCon
 
 	return result, nil
 }
-
-// Helper functions
 
 func (e *Engine) resolveValue(req models.TransformRequest, path string) (string, error) {
 	parts := strings.Split(path, ".")
@@ -342,13 +492,11 @@ func (e *Engine) resolveValue(req models.TransformRequest, path string) (string,
 				return "", fmt.Errorf("unsupported account field: %s", parts[2])
 			}
 		case "metadata":
-			// Handle metadata access: parentTransaction.metadata.loan_account_number
 			if len(parts) < 3 {
 				return "", fmt.Errorf("invalid metadata path: %s", path)
 			}
 			metadataKey := parts[2]
 			if value, ok := req.ParentTransaction.Metadata[metadataKey]; ok {
-				// Convert to string
 				switch v := value.(type) {
 				case string:
 					return v, nil
@@ -405,7 +553,7 @@ func (e *Engine) getConfigMapping(ctx models.TransformContext, path string) (map
 	}
 }
 
-func (e *Engine) validate(req models.TransformRequest, config RuleConfig) error {
+func (e *Engine) validate(req models.TransformRequest, config models.AcuanRuleConfig) error {
 	for _, validation := range config.Validations {
 		switch validation.Type {
 		case "required":
