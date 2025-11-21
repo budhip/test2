@@ -12,6 +12,7 @@ require (
 	github.com/IBM/sarama v1.45.0
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/go-resty/resty/v2 v2.11.0
+	github.com/gorilla/mux v1.8.1
 	github.com/hyperjumptech/grule-rule-engine v1.14.1
 	github.com/labstack/echo/v4 v4.12.0
 	github.com/lib/pq v1.10.9

@@ -1,30 +1,40 @@
 package http
 
 import (
+	"bitbucket.org/Amartha/go-megatron/internal/acuanrepository"
 	"context"
 	"fmt"
 
 	"bitbucket.org/Amartha/go-megatron/internal/config"
 	rulesHttp "bitbucket.org/Amartha/go-megatron/internal/http/rules"
+	transformHttp "bitbucket.org/Amartha/go-megatron/internal/http/transform"
 	"bitbucket.org/Amartha/go-megatron/internal/pkg/graceful"
 	"bitbucket.org/Amartha/go-megatron/internal/repository"
+	"bitbucket.org/Amartha/go-megatron/internal/service"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
 
 type httpAPI struct {
-	e        *echo.Echo
-	cfg      *config.Configuration
-	ruleRepo repository.RuleRepository
+	e                *echo.Echo
+	cfg              *config.Configuration
+	ruleRepo         repository.RuleRepository
+	acuanRuleRepo    acuanrepository.RuleRepository
+	transformService service.TransformService
 }
 
 // NewAPI creates a new HTTP API server
-func NewAPI(cfg *config.Configuration, ruleRepo repository.RuleRepository) Http {
+func NewAPI(cfg *config.Configuration, acuanRuleRepo acuanrepository.RuleRepository, ruleRepo repository.RuleRepository) Http {
+	// Create transform service
+	transformService := service.NewTransformService(acuanRuleRepo)
+
 	return &httpAPI{
-		e:        echo.New(),
-		cfg:      cfg,
-		ruleRepo: ruleRepo,
+		e:                echo.New(),
+		cfg:              cfg,
+		ruleRepo:         ruleRepo,
+		acuanRuleRepo:    acuanRuleRepo,
+		transformService: transformService,
 	}
 }
 
@@ -50,6 +60,20 @@ func (h *httpAPI) Start() (graceful.ProcessStarter, graceful.ProcessStopper) {
 			"service": "Go Megatron API Server",
 			"version": "1.0.0",
 			"env":     h.cfg.App.Env,
+			"endpoints": map[string][]string{
+				"transform": {
+					"POST /api/v1/transform",
+					"POST /api/v1/transform/batch",
+				},
+				"rules": {
+					"POST /api/v1/rules",
+					"GET /api/v1/rules",
+					"GET /api/v1/rules/:name",
+					"PUT /api/v1/rules/:id",
+					"PATCH /api/v1/rules/:id/append",
+					"DELETE /api/v1/rules/:id",
+				},
+			},
 		})
 	})
 
@@ -62,6 +86,9 @@ func (h *httpAPI) Start() (graceful.ProcessStarter, graceful.ProcessStopper) {
 
 	// API v1 routes
 	v1 := h.e.Group("/api/v1")
+
+	// Register transformation routes
+	transformHttp.RegisterRoutes(v1, h.transformService)
 
 	// Register rules management routes
 	rulesHttp.RegisterRoutes(v1, h.ruleRepo)

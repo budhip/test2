@@ -1,6 +1,7 @@
 package transformer
 
 import (
+	"bitbucket.org/Amartha/go-megatron/internal/acuanrepository"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,7 +16,7 @@ import (
 
 // Engine adalah rule engine untuk execute transformation
 type Engine struct {
-	ruleRepo RuleRepository
+	ruleRepo acuanrepository.RuleRepository
 	config   Config
 }
 
@@ -24,7 +25,7 @@ type Config struct {
 	Timeout         time.Duration
 }
 
-func NewEngine(ruleRepo RuleRepository, config Config) *Engine {
+func NewEngine(ruleRepo acuanrepository.RuleRepository, config Config) *Engine {
 	return &Engine{
 		ruleRepo: ruleRepo,
 		config:   config,
@@ -183,7 +184,8 @@ func (e *Engine) resolveAccount(req models.TransformRequest, config AccountConfi
 		return e.resolveValue(req, config.Source)
 
 	case "input":
-		// Get from parent transaction
+		// Get from parent transaction using path
+		// ← PERBAIKAN DI SINI: Gunakan resolveValue untuk handle semua input paths
 		return e.resolveValue(req, config.Source)
 
 	default:
@@ -221,8 +223,26 @@ func (e *Engine) resolveDescription(req models.TransformRequest, config Descript
 		// Simple template replacement
 		result := config.Template
 		result = strings.ReplaceAll(result, "{{parentTransaction.accountNumber}}", req.ParentTransaction.AccountNumber)
+		result = strings.ReplaceAll(result, "{{parentTransaction.destinationAccountNumber}}", req.ParentTransaction.DestinationAccountNumber)
 		result = strings.ReplaceAll(result, "{{parentTransaction.refNumber}}", req.ParentTransaction.RefNumber)
+		result = strings.ReplaceAll(result, "{{parentTransaction.description}}", req.ParentTransaction.Description)
+		result = strings.ReplaceAll(result, "{{parentTransaction.transactionType}}", req.ParentTransaction.TransactionType)
+
+		// Handle metadata templates: {{parentTransaction.metadata.loan_account_number}}
+		for key, value := range req.ParentTransaction.Metadata {
+			placeholder := fmt.Sprintf("{{parentTransaction.metadata.%s}}", key)
+			result = strings.ReplaceAll(result, placeholder, fmt.Sprintf("%v", value))
+		}
+
 		return result, nil
+
+	case "input":
+		// Get description from input path
+		if config.Source == "" {
+			// Default to parentTransaction.description if no source specified
+			return req.ParentTransaction.Description, nil
+		}
+		return e.resolveValue(req, config.Source)
 
 	default:
 		return "", fmt.Errorf("unsupported description type: %s", config.Type)
@@ -243,14 +263,23 @@ func (e *Engine) resolveMetadata(req models.TransformRequest, config MetadataCon
 					for k, v := range req.ParentTransaction.Metadata {
 						result[k] = v
 					}
+				} else {
+					// Try to resolve as path
+					value, err := e.resolveValue(req, sourceStr)
+					if err == nil && value != "" {
+						// Extract key name from path (e.g., "loan_account_number" from path)
+						parts := strings.Split(sourceStr, ".")
+						key := parts[len(parts)-1]
+						result[key] = value
+					}
 				}
 			} else if sourceMap, ok := source.(map[string]interface{}); ok {
 				// It's a dynamic config
 				if sourceMap["type"] == "dynamic" {
 					field := sourceMap["field"].(string)
 					sourcePath := sourceMap["source"].(string)
-					value, _ := e.resolveValue(req, sourcePath)
-					if value != "" {
+					value, err := e.resolveValue(req, sourcePath)
+					if err == nil && value != "" {
 						result[field] = value
 					}
 				}
@@ -273,15 +302,83 @@ func (e *Engine) resolveValue(req models.TransformRequest, path string) (string,
 	parts := strings.Split(path, ".")
 
 	if parts[0] == "parentTransaction" {
+		if len(parts) < 2 {
+			return "", fmt.Errorf("invalid path: %s", path)
+		}
+
 		switch parts[1] {
+		case "id":
+			return req.ParentTransaction.ID, nil
 		case "accountNumber":
 			return req.ParentTransaction.AccountNumber, nil
+		case "destinationAccountNumber":
+			return req.ParentTransaction.DestinationAccountNumber, nil
 		case "refNumber":
 			return req.ParentTransaction.RefNumber, nil
+		case "description":
+			return req.ParentTransaction.Description, nil
+		case "transactionType":
+			return req.ParentTransaction.TransactionType, nil
+		case "transactionFlow":
+			return req.ParentTransaction.TransactionFlow, nil
+		case "status":
+			return req.ParentTransaction.Status, nil
 		case "account":
-			if len(parts) == 3 && parts[2] == "entity" {
-				return req.ParentTransaction.Account.Entity, nil
+			if len(parts) < 3 {
+				return "", fmt.Errorf("invalid account path: %s", path)
 			}
+			switch parts[2] {
+			case "accountNumber":
+				return req.ParentTransaction.Account.AccountNumber, nil
+			case "name":
+				return req.ParentTransaction.Account.Name, nil
+			case "entity":
+				return req.ParentTransaction.Account.Entity, nil
+			case "categoryCode":
+				return req.ParentTransaction.Account.CategoryCode, nil
+			case "subCategoryCode":
+				return req.ParentTransaction.Account.SubCategoryCode, nil
+			default:
+				return "", fmt.Errorf("unsupported account field: %s", parts[2])
+			}
+		case "metadata":
+			// Handle metadata access: parentTransaction.metadata.loan_account_number
+			if len(parts) < 3 {
+				return "", fmt.Errorf("invalid metadata path: %s", path)
+			}
+			metadataKey := parts[2]
+			if value, ok := req.ParentTransaction.Metadata[metadataKey]; ok {
+				// Convert to string
+				switch v := value.(type) {
+				case string:
+					return v, nil
+				case float64:
+					return fmt.Sprintf("%v", v), nil
+				case int:
+					return fmt.Sprintf("%d", v), nil
+				case bool:
+					return fmt.Sprintf("%t", v), nil
+				default:
+					return fmt.Sprintf("%v", v), nil
+				}
+			}
+			return "", fmt.Errorf("metadata key not found: %s", metadataKey)
+		default:
+			return "", fmt.Errorf("unsupported parentTransaction field: %s", parts[1])
+		}
+	}
+
+	if parts[0] == "amount" {
+		if len(parts) < 2 {
+			return "", fmt.Errorf("invalid amount path: %s", path)
+		}
+		switch parts[1] {
+		case "value":
+			return req.Amount.Value.String(), nil
+		case "currency":
+			return req.Amount.Currency, nil
+		default:
+			return "", fmt.Errorf("unsupported amount field: %s", parts[1])
 		}
 	}
 
@@ -369,6 +466,7 @@ type DescriptionConfig struct {
 	Type     string `json:"type"` // "static", "template"
 	Value    string `json:"value,omitempty"`
 	Template string `json:"template,omitempty"`
+	Source   string `json:"source,omitempty"`
 }
 
 type MetadataConfig struct {

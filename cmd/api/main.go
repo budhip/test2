@@ -14,6 +14,8 @@ import (
 	"bitbucket.org/Amartha/go-megatron/internal/http"
 	"bitbucket.org/Amartha/go-megatron/internal/repository"
 
+	"bitbucket.org/Amartha/go-megatron/internal/acuanrepository"
+
 	_ "github.com/lib/pq"
 )
 
@@ -42,9 +44,10 @@ func main() {
 
 	// Setup repositories
 	ruleRepo := repository.NewRuleRepository(db)
+	acuanRulerepo := acuanrepository.NewRuleRepository(db)
 
 	// Setup HTTP API
-	apiServer := http.NewAPI(cfg, ruleRepo)
+	apiServer := http.NewAPI(cfg, acuanRulerepo, ruleRepo)
 	starter, stopper := apiServer.Start()
 
 	// Start server in goroutine
@@ -56,12 +59,15 @@ func main() {
 
 	log.Println("✅ API Server is running")
 	log.Println("📍 Endpoints available:")
-	log.Println("   - GET  /")
-	log.Println("   - GET  /health")
-	log.Println("   - POST /api/v1/rules")
-	log.Println("   - GET  /api/v1/rules")
-	log.Println("   - GET  /api/v1/rules/:name")
-	log.Println("   - PUT  /api/v1/rules/:id")
+	log.Println("\n   🔄 Transformation:")
+	log.Println("   - POST /api/v1/transform")
+	log.Println("   - POST /api/v1/transform/batch")
+	log.Println("\n   📋 Rules Management:")
+	log.Println("   - POST   /api/v1/rules")
+	log.Println("   - GET    /api/v1/rules")
+	log.Println("   - GET    /api/v1/rules/:name")
+	log.Println("   - PUT    /api/v1/rules/:id")
+	log.Println("   - PATCH  /api/v1/rules/:id/append")
 	log.Println("   - DELETE /api/v1/rules/:id")
 	log.Println("\n⌨️  Press Ctrl+C to stop")
 
@@ -85,7 +91,7 @@ func main() {
 
 func setupDatabase(cfg *config.Configuration) (*sql.DB, error) {
 	dsn := fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s",
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
 		cfg.Database.Host,
 		cfg.Database.Port,
 		cfg.Database.User,
@@ -119,7 +125,7 @@ func printBanner() {
 ╔═══════════════════════════════════════════════╗
 ║                                               ║
 ║         GO-MEGATRON API SERVER                ║
-║         Rule Management System                ║
+║    Transformation & Rule Management           ║
 ║                                               ║
 ╚═══════════════════════════════════════════════╝
 `
